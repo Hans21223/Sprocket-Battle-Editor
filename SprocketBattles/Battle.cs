@@ -171,10 +171,13 @@ internal static class Battle
             var gateway = fresh[i].Vehicle?.TryCast<IVehicleGateway>();
             var root = gateway?.transform;
             if (root == null) { Trace.Write($"placing: tank {i} has no transform"); continue; }
-            var target = Files.Vector(order[i].Position);
-            float above = root.position.y - GroundBelow(root, root.position);
-            root.SetPositionAndRotation(new Vector3(target.x, target.y + Math.Max(0.1f, above), target.z), Quaternion.Euler(0, order[i].Yaw, 0));
-            foreach (var body in root.GetComponentsInChildren<Rigidbody>()) { body.velocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+            if (!order[i].AtSpawn)
+            {
+                var target = Files.Vector(order[i].Position);
+                float above = root.position.y - GroundBelow(root, root.position);
+                root.SetPositionAndRotation(new Vector3(target.x, target.y + Math.Max(0.1f, above), target.z), Quaternion.Euler(0, order[i].Yaw, 0));
+                foreach (var body in root.GetComponentsInChildren<Rigidbody>()) { body.velocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+            }
             if ((gateway!.Behaviour?.TryCast<VehicleBehaviour>() ?? root.GetComponentInChildren<VehicleBehaviour>()) is { } tank)
             {
                 tanks[order[i].Id] = tank;

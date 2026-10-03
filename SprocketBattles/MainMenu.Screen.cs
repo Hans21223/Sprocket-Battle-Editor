@@ -148,6 +148,16 @@ internal static partial class MainMenu
         else
         {
             wanted.Add(("new", "New battle", () => { choosingMap = true; Fill(); }, ShowNew, false));
+            wanted.Add(("quick", "Quick battle", () => { quickOpen = !quickOpen; actionsFor = -1; Fill(); ShowQuick(); }, ShowQuick, false));
+            if (quickOpen)
+            {
+                var mapNames = MapList().Select(m => m.Map).ToList();
+                wanted.Add(("quick map", "      Map: " + (quickMap < 0 || quickMap >= mapNames.Count ? "any" : mapNames[quickMap]),
+                    () => { quickMap = quickMap + 1 >= mapNames.Count ? -1 : quickMap + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+                wanted.Add(("quick size", $"      Tanks a side: {QuickSizes[quickSize]}", () => { quickSize = (quickSize + 1) % QuickSizes.Length; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+                wanted.Add(("quick designs", "      Designs: " + QuickPools[quickPool], () => { quickPool = (quickPool + 1) % QuickPools.Length; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+                wanted.Add(("quick start", "      Start", QuickBattle, ShowQuick, false));
+            }
             for (int i = 0; i < battles.Count; i++)
             {
                 int index = i;
@@ -241,6 +251,49 @@ internal static partial class MainMenu
             catch (Exception) { fade.Play(); }
         }
         return item;
+    }
+
+    // ---------- quick battle ----------
+
+    // A battle with nothing to set up: so many random designs a side on a map (or any), started where the game spawns
+    // them, and not saved (F9 in it opens the editor as on any custom battle).
+    static bool quickOpen;
+    static int quickMap = -1, quickSize = 2, quickPool;
+    static readonly int[] QuickSizes = { 1, 2, 3, 4, 6, 8 };
+    static readonly string[] QuickPools = { "yours", "the game's", "yours and the game's" };
+    static readonly System.Random dice = new();
+
+    /// The designs a quick battle picks from: yours (not autosaves), the game's tanks (not its AT guns or targets), or both.
+    static List<(string Path, string Name)> QuickDesigns() => Files.Designs().Where(d =>
+    {
+        bool game = d.Path.StartsWith("game:", StringComparison.OrdinalIgnoreCase);
+        if (game ? Files.IsATGun(d.Path) || d.Name.Contains("Target") : d.Name.StartsWith("Autosave")) return false;
+        return quickPool == 2 || (quickPool == 0) != game;
+    }).ToList();
+
+    static void ShowQuick()
+    {
+        var maps = MapList();
+        bool chosen = quickMap >= 0 && quickMap < maps.Count;
+        Show($"quick {quickMap} {quickSize} {quickPool}", "Quick battle",
+             $"{QuickSizes[quickSize]} vs {QuickSizes[quickSize]} tanks, each picked at random from {QuickDesigns().Count} designs ({QuickPools[quickPool]}), " +
+             $"on {(chosen ? maps[quickMap].Map : "a map picked at random")}. They start where the game spawns them, and nothing is saved.",
+             new[] { "Destroy every enemy tank" }, new[] { "Lose all vehicles" }, new[] { "QUICK BATTLE" },
+             chosen ? SplashPath(maps[quickMap].Map, scenario: true) : maps.Count > 0 ? maps[0].ScenarioSplash : "");
+    }
+
+    static void QuickBattle()
+    {
+        var maps = MapList(); var designs = QuickDesigns();
+        if (maps.Count == 0 || designs.Count == 0) { Tell(designs.Count == 0 ? "No designs to pick from: try the other Designs choice." : "No maps to fight on."); return; }
+        var map = quickMap >= 0 && quickMap < maps.Count ? maps[quickMap] : maps[dice.Next(maps.Count)];
+        int size = map.Spawns > 0 ? Math.Min(QuickSizes[quickSize], map.Spawns) : QuickSizes[quickSize];
+        var b = new BattleFile { Name = "Quick battle", Map = map.Map };
+        for (int team = 0; team < 2; team++)
+            for (int i = 0; i < size; i++)
+                b.Units.Add(new BattleUnit { Id = b.NewId(), Team = team, Blueprint = designs[dice.Next(designs.Count)].Path, AtSpawn = true });
+        Trace.Write($"menu: quick battle on {map.Map}: {string.Join(", ", b.Units.Select(u => $"{u.Id} {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}"))}");
+        Start(b, play: true);
     }
 
     // ---------- the dropdown's settings ----------

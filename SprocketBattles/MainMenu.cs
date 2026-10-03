@@ -57,7 +57,7 @@ internal static partial class MainMenu
 
     static void CloseMenu()
     {
-        actionsFor = -1; typingKey = null; typingDone = null; // the battles' dropdowns closed for next time
+        actionsFor = -1; quickOpen = false; typingKey = null; typingDone = null; // the dropdowns closed for next time
         CloseScreen();
         if (canvas != null) { canvas.SetActive(false); UnityEngine.Object.Destroy(canvas); }
         canvas = null;

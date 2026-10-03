@@ -21,6 +21,8 @@ With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../..
 - **Main menu → Battle Editor** (just under Custom Battle) opens the **Battle Editor** screen: the game's own Scenarios
   screen, listing your battles. Point at one to see its map, description, objectives and fail conditions.
   - **New battle**: pick a map, and the editor opens on it.
+  - **Quick battle**: nothing to set up. Choose the map (or any), 1 to 8 tanks a side and whose designs (yours, the
+    game's tanks, or both), then Start: each tank is a random pick, starting where the game spawns it. Not saved.
   - **Click a battle** for its actions: Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Delete.
   - Starting goes through the game's Custom Battle screen behind a plain "Starting…" cover, filled in for you.
 - **F9** in any custom battle opens the editor; **F10** opens the command view.

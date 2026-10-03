@@ -7,7 +7,7 @@ the Sprocket folder.
 
 START
 - Main menu > Battle Editor (under Custom Battle): your battles on the game's Scenarios screen. New battle picks
-  a map and opens the editor. Click a battle for Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Delete.
+  a map and opens the editor; Quick battle starts random tanks a side on a map with nothing to set up. Click a battle for Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Delete.
 - In any custom battle: F9 opens the editor, F10 the command view.
 
 THE EDITOR (F9)

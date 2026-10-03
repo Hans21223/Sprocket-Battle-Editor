@@ -63,6 +63,14 @@ static class BattleTests
         Check(c.Tanks.Count == 1 && c.Tanks[0].Keys.All(k => k.ShootAt == null && k.AimUnit == null), "keys no longer aim or shoot at it, its track gone");
         Check(c.Tanks[0].Keys[1].DriveTo != null, "the rest of a key stays");
 
-        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal");
+        // A quick battle's tanks stay where the game spawns them; others don't say so in the file.
+        var quick = new BattleFile { Map = "Fields" };
+        quick.Units.Add(new BattleUnit { Id = "u1", Blueprint = "A", AtSpawn = true });
+        quick.Units.Add(new BattleUnit { Id = "u2", Team = 1, Blueprint = "B" });
+        var json = quick.ToJson();
+        Check(BattleFile.FromJson(json).Units[0].AtSpawn && !BattleFile.FromJson(json).Units[1].AtSpawn, "at-spawn reads back");
+        Check(json.Split("atSpawn").Length == 2, "at-spawn written only where set");
+
+        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal, at-spawn");
     }
 }

@@ -79,6 +79,8 @@ public sealed class BattleUnit
     public string Control { get; set; } = "ai";   // "player", "ai", or "slot:N"
     /// Held off the map until a mission rule brings its team's reserves in.
     public bool Reserve { get; set; }
+    /// Left where the game spawns it instead of moved to Position (a quick battle's tanks).
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool AtSpawn { get; set; }
     /// What the AI does, in order: drive through each "move" point (the path), then go for the "attack" target.
     public List<BattleOrder>? Orders { get; set; }
 
