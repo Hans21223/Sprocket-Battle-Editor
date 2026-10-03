@@ -316,15 +316,16 @@ internal static class Mission
     }
 }
 
-/// Explosions to see and hear (mines, artillery): the burst the game's own HE shells make on the ground
-/// (ProjectileEffectConfig, the shell impact effect with its sound) and the dirt a shell throws up there, as big as a
-/// shell of a calibre to match the blast, with a flash; the game's explosion effect if no shell effect is loaded.
+/// Explosions to see and hear (mines, artillery): the burst the game's own HE shells make on the ground (its
+/// LargeDirtExplosion, with its sound) and the dirt a shell throws up there, as big as a shell of a calibre to match
+/// the blast, with a flash; the game's explosion effect if no shell effect is loaded.
 internal static class Effects
 {
     static Sprocket.Vehicles.Weapons.ProjectileEffectConfig? shells;
     static GameObject? prefab;
+    static GameObject? holder;
+    static bool toldBurst;
     static float lookedAt = -100;
-    static bool toldUnsized;
     static readonly List<(Vector3 At, float Power, float When)> pending = new();
     static readonly List<(HDAdditionalLightData Light, float Peak, float Start)> flashes = new();
 
@@ -340,15 +341,20 @@ internal static class Effects
             prefab = found.Length > 0 ? found[0].gameObject : null;
             Trace.Write($"effects: {(shells != null ? $"the game's shell bursts ({shells.name})" : prefab != null ? $"the game's explosion {prefab.name}" : "none of the game's loaded, nothing shown")}");
         }
-        if (shells != null)
+        if (shells?.impactEffectPrototype is { } impact)
         {
             int calibre = Mission.Calibre(power);
-            foreach (var type in new[] { Sprocket.DamageModelling.ProjectileEffectType.Explosion, Sprocket.DamageModelling.ProjectileEffectType.EnvironmentImpact })
-                shells.PlayEffect(new Sprocket.DamageModelling.ProjectileEffectInfo
-                {
-                    Type = type, Position = at, HitNormal = Vector3.up, HitVelocity = Vector3.down * 300, Calibre = (ushort)calibre,
-                });
-            Size(at, calibre / 75f);
+            // Facing a random way along the ground, as a tank's shell lands (the game turns it to the shell's flight).
+            var facing = Quaternion.LookRotation(Quaternion.Euler(0, UnityEngine.Random.value * 360, 0) * Vector3.forward, Vector3.up);
+            float scale = Math.Max(0.5f, calibre / Math.Max(1, impact.calibreReference));
+            float delay = Camera.main is { } cam ? Vector3.Distance(cam.transform.position, at) / 343f : 0;
+            Burst(impact, impact.explosionAssets, at, facing, scale, calibre, delay);
+            Burst(impact, impact.environmentImpactAssets, at, facing, scale, calibre, -1);
+            if (!toldBurst)
+            {
+                toldBurst = true;
+                Trace.Write($"effects: {calibre} mm blast at {scale:0.0}x, {impact.explosionAssets?.VisualEffect?.name} and {impact.environmentImpactAssets?.VisualEffect?.name}, sound after {delay:0.0} s");
+            }
             Flash(at, calibre);
             return;
         }
@@ -362,15 +368,36 @@ internal static class Effects
         }
     }
 
-    /// The game sizes a shell's burst calibre / 75 mm, but 1.25 at most (from about 94 mm up they all look alike), set on
-    /// the effect as it plays: the bursts just played here sized again without that cap. The game's own shells keep it.
-    static void Size(Vector3 at, float scale)
+    /// One of the game's shell impact effects played on a copy of its own, not through the game
+    /// (ProjectileEffectConfig.PlayEffect): the game caps a burst's size at 1.25 (calibre / 75 mm, so from about 94 mm up
+    /// they all looked alike), and sets a "Calibre" value on every one, which the explosion's effect graph doesn't have
+    /// (an error in the log for each shell). The copy is made inside an inactive holder and its game script taken off
+    /// before it ever starts, so the game's effect pool never knows of it. Its sound (a negative delay: none) comes
+    /// late with distance, as the game's does.
+    static void Burst(Sprocket.Vehicles.Weapons.ProjectileImpactEffect impact, Sprocket.Vehicles.Weapons.ProjectileImpactEffect.ShellImpactEffectAssets assets,
+                      Vector3 at, Quaternion facing, float scale, int calibre, float soundDelay)
     {
-        if (scale <= 1.25f) return;
-        int sized = 0;
-        foreach (var e in UnityEngine.Object.FindObjectsOfType<Sprocket.Vehicles.Weapons.ProjectileImpactEffect>())
-            if ((e.transform.position - at).sqrMagnitude < 1) { e.transform.localScale = Vector3.one * scale; sized++; }
-        if (sized == 0 && !toldUnsized) { toldUnsized = true; Trace.Write("effects: the shell bursts weren't found where they played, so they keep the game's size"); }
+        if (assets?.VisualEffect == null) return;
+        if (holder == null) { holder = new GameObject("Battle Editor effects"); holder.SetActive(false); }
+        var o = UnityEngine.Object.Instantiate(impact.gameObject, holder.transform);
+        UnityEngine.Object.DestroyImmediate(o.GetComponent<Sprocket.Vehicles.Weapons.ProjectileImpactEffect>());
+        o.name = "Battle Editor blast";
+        o.transform.SetParent(null, false);
+        o.transform.SetPositionAndRotation(at, facing);
+        o.transform.localScale = Vector3.one * scale;
+        var vfx = o.GetComponent<UnityEngine.VFX.VisualEffect>();
+        if (vfx != null)
+        {
+            vfx.visualEffectAsset = assets.VisualEffect;
+            if (vfx.HasFloat("Calibre")) vfx.SetFloat("Calibre", calibre);
+            vfx.Play();
+        }
+        if (o.GetComponent<AudioSource>() is { } audio)
+        {
+            if (soundDelay >= 0 && assets.AudioEffect != null) { audio.clip = assets.AudioEffect; audio.PlayDelayed(soundDelay); }
+            else audio.enabled = false;
+        }
+        UnityEngine.Object.Destroy(o, Math.Max(assets.Duration, soundDelay + 8));
     }
 
     /// A flash of light, brighter and wider for a bigger shell, gone in about half a second.
