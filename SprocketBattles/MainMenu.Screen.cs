@@ -108,7 +108,7 @@ internal static partial class MainMenu
         title = screen.transform.Find("Content/Text (TMP)")?.GetComponent<TMP_Text>();
         if (title != null)
         {
-            // "CUSTOM BATTLES" on one line, as long as the line under it (shrunk to fit if it must).
+            // "BATTLE EDITOR" on one line, as long as the line under it (shrunk to fit if it must).
             title.enableWordWrapping = false;
             title.fontSizeMax = title.fontSize; title.fontSizeMin = title.fontSize * 0.6f;
             title.enableAutoSizing = true;
@@ -138,7 +138,7 @@ internal static partial class MainMenu
     static void Fill()
     {
         if (screen == null) return;
-        if (title != null) title.text = choosingMap ? "NEW CUSTOM BATTLE" : "CUSTOM BATTLES";
+        if (title != null) title.text = choosingMap ? "NEW BATTLE" : "BATTLE EDITOR";
         var wanted = new List<(string Key, string Text, Action Click, Action Hover, bool Dim)>();
         if (choosingMap)
         {
@@ -147,7 +147,7 @@ internal static partial class MainMenu
         }
         else
         {
-            wanted.Add(("new", "New custom battle", () => { choosingMap = true; Fill(); }, ShowNew, false));
+            wanted.Add(("new", "New battle", () => { choosingMap = true; Fill(); }, ShowNew, false));
             for (int i = 0; i < battles.Count; i++)
             {
                 int index = i;
@@ -343,7 +343,7 @@ internal static partial class MainMenu
     }
 
     static void ShowMap((string Map, string Splash, string ScenarioSplash, int Spawns) map) =>
-        Show("map " + map.Map, map.Map, $"A new custom battle on {map.Map}: up to {map.Spawns} tanks a side. Place them, then add a mission and a cinematic.",
+        Show("map " + map.Map, map.Map, $"A new battle on {map.Map}: up to {map.Spawns} tanks a side. Place them, then add a mission and a cinematic.",
              new[] { "Set by your mission" }, new[] { "Set by your mission" }, new[] { map.Map.ToUpperInvariant() },
              string.IsNullOrEmpty(map.Splash) ? map.ScenarioSplash : map.Splash);
 

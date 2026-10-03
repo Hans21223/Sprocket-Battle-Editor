@@ -298,22 +298,33 @@ internal static partial class MainMenu
     {
         if (maps != null) return maps;
         var list = new List<(int Order, string Map, string Splash, string ScenarioSplash, int Spawns)>();
+        // The game's own list (so maps a mod like the Map Framework adds are in it); its config files if that fails. Only
+        // the custom battle maps: Ambush has a setup in its scene, but without the Map Framework's repair the game's start
+        // throws on it and the battle never leaves the loading screen.
         try
         {
-            var dir = System.IO.Path.Combine(Application.streamingAssetsPath, "Scenarios", "Configs");
-            foreach (var f in Directory.GetFiles(dir, "*.json"))
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(f));
-                var r = doc.RootElement;
-                // Only the game's own custom battle maps: Ambush has a Deathmatch setup in its scene, but the game's start
-                // throws on it (DeathmatchGameMode.Load: key '2' not found) and the battle never leaves the loading screen.
-                if (!r.TryGetProperty("Deathmatch", out var d) || !d.GetBoolean()) continue;
-                string Text(string key) => r.TryGetProperty(key, out var v) ? v.GetString() ?? "" : "";
-                int spawns = r.TryGetProperty("TeamSpawnsSupported", out var s) && s.GetArrayLength() > 0 ? s[0].GetInt32() : 0;
-                list.Add((r.GetProperty("Order").GetInt32(), Text("Identifier"), Text("CustomBattleSplashPath"), Text("ScenarioSplashPath"), spawns));
-            }
+            var defined = Sprocket.UI.ScenarioLoader.GetScenarioDefinitions(System.IO.Path.Combine(Application.streamingAssetsPath, "Scenarios", "Configs"));
+            for (int i = 0; i < defined.Length; i++)
+                if (defined[i]?.Config is { Deathmatch: true } c)
+                    list.Add((c.Order, c.Identifier, c.CustomBattleSplashPath ?? "", c.ScenarioSplashPath ?? "",
+                              c.TeamSpawnsSupported is { Length: > 0 } s ? s[0] : 0));
         }
-        catch (Exception ex) { Trace.Write($"menu: couldn't read the maps: {ex.Message}"); return new(); }
+        catch (Exception ex) { Trace.Write($"menu: the game's map list couldn't be read ({ex.Message}); reading its files"); list.Clear(); }
+        if (list.Count == 0)
+            try
+            {
+                var dir = System.IO.Path.Combine(Application.streamingAssetsPath, "Scenarios", "Configs");
+                foreach (var f in Directory.GetFiles(dir, "*.json"))
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(f));
+                    var r = doc.RootElement;
+                    if (!r.TryGetProperty("Deathmatch", out var d) || !d.GetBoolean()) continue;
+                    string Text(string key) => r.TryGetProperty(key, out var v) ? v.GetString() ?? "" : "";
+                    int spawns = r.TryGetProperty("TeamSpawnsSupported", out var s) && s.GetArrayLength() > 0 ? s[0].GetInt32() : 0;
+                    list.Add((r.GetProperty("Order").GetInt32(), Text("Identifier"), Text("CustomBattleSplashPath"), Text("ScenarioSplashPath"), spawns));
+                }
+            }
+            catch (Exception ex) { Trace.Write($"menu: couldn't read the maps: {ex.Message}"); return new(); }
         return maps = list.OrderBy(m => m.Order).Select(m => (m.Map, m.Splash, m.ScenarioSplash, m.Spawns)).ToList();
     }
 

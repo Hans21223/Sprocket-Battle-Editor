@@ -18,9 +18,9 @@ With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../..
 
 ## Starting
 
-- **Main menu → Battle Editor** (just under Custom Battle) opens the **Custom Battles** screen: the game's own Scenarios
+- **Main menu → Battle Editor** (just under Custom Battle) opens the **Battle Editor** screen: the game's own Scenarios
   screen, listing your battles. Point at one to see its map, description, objectives and fail conditions.
-  - **New custom battle**: pick a map, and the editor opens on it.
+  - **New battle**: pick a map, and the editor opens on it.
   - **Click a battle** for its actions: Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Delete.
   - Starting goes through the game's Custom Battle screen behind a plain "Starting…" cover, filled in for you.
 - **F9** in any custom battle opens the editor; **F10** opens the command view.

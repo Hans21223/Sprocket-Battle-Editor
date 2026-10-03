@@ -6,7 +6,7 @@ Needs the Sprocket Mod Loader (BepInEx 6 IL2CPP). Add the zip in Sprocket Mod Ma
 the Sprocket folder.
 
 START
-- Main menu > Battle Editor (under Custom Battle): your battles on the game's Scenarios screen. New custom battle picks
+- Main menu > Battle Editor (under Custom Battle): your battles on the game's Scenarios screen. New battle picks
   a map and opens the editor. Click a battle for Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Delete.
 - In any custom battle: F9 opens the editor, F10 the command view.
 
