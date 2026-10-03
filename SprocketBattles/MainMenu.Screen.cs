@@ -158,6 +158,20 @@ internal static partial class MainMenu
                 wanted.Add(("quick designs", "      Designs: " + QuickPools[quickPool], () => { quickPool = (quickPool + 1) % QuickPools.Length; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
                 wanted.Add(("quick start", "      Start", QuickBattle, ShowQuick, false));
             }
+            wanted.Add(("import", "Import a shared battle", () =>
+            {
+                importOpen = !importOpen; actionsFor = -1; quickOpen = false;
+                sharedZips = importOpen ? Sharing.Find(new[] { Files.Shared, Files.Downloads }) : null;
+                Fill(); ShowImport();
+            }, ShowImport, false));
+            if (importOpen)
+            {
+                if (sharedZips is not { Count: > 0 })
+                    wanted.Add(("import none", "      None found: open the Shared folder", () => OpenFolder(Files.Shared), ShowImport, false));
+                else
+                    foreach (var zip in sharedZips.Take(10))
+                        wanted.Add(("import " + zip, "      " + Path.GetFileNameWithoutExtension(zip).Replace(" (Sprocket battle)", ""), () => Import(zip), ShowImport, false));
+            }
             for (int i = 0; i < battles.Count; i++)
             {
                 int index = i;
@@ -187,6 +201,7 @@ internal static partial class MainMenu
                 wanted.Add(("clouds", $"      Clouds: {b.Clouds}", () => { b.Clouds = Next(CloudNames, b.Clouds); Save(path, b); Fill(); }, () => ShowBattle(index), false));
                 wanted.Add(("fog", $"      Fog: {b.Fog}", () => { b.Fog = Next(FogNames, b.Fog); Save(path, b); Fill(); }, () => ShowBattle(index), false));
                 wanted.Add(("duplicate", "      Duplicate", () => Duplicate(b), () => ShowBattle(index), false));
+                wanted.Add(("share", "      Share", () => Share(b), () => ShowBattle(index), false));
                 wanted.Add(("delete", deleteArmed ? "      Sure? Delete" : "      Delete", () =>
                 {
                     if (!deleteArmed) { deleteArmed = true; Fill(); return; }
@@ -402,6 +417,12 @@ internal static partial class MainMenu
         Show("map " + map.Map, map.Map, $"A new battle on {map.Map}: up to {map.Spawns} tanks a side. Place them, then add a mission and a cinematic.",
              new[] { "Set by your mission" }, new[] { "Set by your mission" }, new[] { map.Map.ToUpperInvariant() },
              string.IsNullOrEmpty(map.Splash) ? map.ScenarioSplash : map.Splash);
+
+    static void ShowImport() =>
+        Show("import", "Import a shared battle",
+             "A battle someone shared with you: put its .zip in My Games\\Sprocket\\Battles\\Shared (or leave it in Downloads) and click it here. " +
+             $"Its designs go into a faction of their own, {Sharing.Faction}, and the battle into your list. To share one of yours, click it, then Share.",
+             new[] { "Set by its mission" }, new[] { "Set by its mission" }, new[] { "SHARED BATTLES" }, MapList().FirstOrDefault().ScenarioSplash ?? "");
 
     static void ShowNew()
     {

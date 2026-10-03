@@ -9,5 +9,6 @@
   <ItemGroup>
     <Compile Include="..\SprocketBattles\BattleFile.cs" Link="BattleFile.cs" />
     <Compile Include="..\SprocketBattles\DriveSim.cs" Link="DriveSim.cs" />
+    <Compile Include="..\SprocketBattles\Sharing.cs" Link="Sharing.cs" />
   </ItemGroup>
 </Project>

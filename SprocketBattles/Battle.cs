@@ -689,6 +689,9 @@ internal static class Files
 {
     internal static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "My Games", "Sprocket");
     internal static string Battles => Path.Combine(Root, "Battles");
+    /// Where a shared battle's zip is written, and looked for (with Downloads) to put one in.
+    internal static string Shared => Path.Combine(Battles, "Shared");
+    internal static string Downloads => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
 
     /// A battle's file: its name, with what a file name can't have taken out.
     internal static string BattlePath(string name)
@@ -745,6 +748,14 @@ internal static class Files
     /// An anti-tank gun by its name ("NTL AT Gun", "TaigaATGun", "FieldsLightAT").
     internal static bool IsATGun(string path) =>
         System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileNameWithoutExtension(path), @"AT( ?Gun)?$|ATGun", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// The faction a design is from (its folder in Factions), or "Base game" for the game's own vehicles.
+    internal static string FactionOf(string path)
+    {
+        if (path.StartsWith("game:", StringComparison.OrdinalIgnoreCase)) return "Base game";
+        var parts = path.Split('\\', '/');
+        return parts.Length > 2 && parts[0].Equals("Factions", StringComparison.OrdinalIgnoreCase) ? parts[1] : "Other";
+    }
 
     internal static Vector3 Vector(float[] v) => new(v[0], v[1], v[2]);
     internal static float[] Array(Vector3 v) => new[] { v.x, v.y, v.z };

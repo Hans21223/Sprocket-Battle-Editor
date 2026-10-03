@@ -20,7 +20,9 @@ public sealed partial class BattleEditor : MonoBehaviour
     bool editing;
     BattleFile file = new();
     BattleUnit? selected;
-    List<(string Path, string Name)> designs = new();
+    List<(string Path, string Name)> designs = new();    // the picked faction's (every one's for "All")
+    List<(string Path, string Name)> allDesigns = new();
+    static string faction = "All";
     int design;
     int team;
     string status = "";
@@ -145,6 +147,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         }
         if (previewing) { Preview(keys); return; }
         if (typing != null) { Type(keys); return; }
+        if (savedList != null) { if (keys.escapeKey.wasPressedThisFrame) savedList = null; return; } // waits for a pick
         FlyCamera(keys, mouse, overPanel);
         EditKeys(keys);
         switch (tab)
@@ -196,8 +199,8 @@ public sealed partial class BattleEditor : MonoBehaviour
             Put(t.transform, t.transform.position + Vector3.down * 1000, t.transform.rotation);
         }
         Physics.SyncTransforms();
-        designs = Files.Designs();
-        design = Math.Clamp(design, 0, Math.Max(0, designs.Count - 1));
+        allDesigns = Files.Designs();
+        ShowFaction();
         // A new battle starts empty (Load saved brings the saved one back); back in the same one (after Play, or F9 and
         // F9 again), what's placed stays.
         if (file.Map != map || mode.GetInstanceID() != editedBattle) file = new BattleFile { Map = map };
@@ -301,7 +304,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         // the editor (EditKeys), the command view (CommandUpdate) and under the mission's end banner. Off while Esc puts
         // down a tool, a pick, a name being typed, a preview, a selection or a tank under your control. (Switching the
         // game's pause key off and on again is the likely cause of a crash on leaving a battle for the main menu.)
-        bool escPauses = editing ? typing == null && !previewing && tool == Tool.Tanks && missionTool == MissionTool.None && keyPick == KeyPick.None
+        bool escPauses = editing ? typing == null && !previewing && savedList == null && tool == Tool.Tanks && missionTool == MissionTool.None && keyPick == KeyPick.None
                        : commanding ? chosen.Count == 0 && puppet == null
                        : true;
         var on = InputSystem.ListEnabledActions();
@@ -323,19 +326,19 @@ public sealed partial class BattleEditor : MonoBehaviour
         var edit = FindObjectOfType<Sprocket.CustomBattles.CustomBattleCreation>()?.ConfigEdit;
         var teams = edit?.Config?.Teams;
         if (edit == null || teams == null) return;
-        if (designs.Count == 0) designs = Files.Designs();
-        if (designs.Count == 0) return;
+        if (allDesigns.Count == 0) allDesigns = Files.Designs();
+        if (allDesigns.Count == 0) return;
         int filled = 0;
         for (int t = 0; t < teams.Length; t++)
-            if (teams[t] != null && teams[t].UnitCount == 0 && Battle.UnitFor(designs[0].Path) is { } unit)
+            if (teams[t] != null && teams[t].UnitCount == 0 && Battle.UnitFor(allDesigns[0].Path) is { } unit)
             {
                 teams[t].Units.Add(unit, new Sprocket.CustomBattles.UnitInstanceInfo { Count = 1 });
                 filled++;
             }
         if (filled == 0) return;
         edit.RaiseDirtyFlags(Sprocket.CustomBattles.BattleConfigDirtyFlags.Everything);
-        Trace.Write($"setup screen: {filled} empty teams given a {designs[0].Name} so the battle can start");
-        Say($"Battle Editor: empty teams got a {designs[0].Name} so the battle can start. Pick the map and start; it won't be in your battle.");
+        Trace.Write($"setup screen: {filled} empty teams given a {allDesigns[0].Name} so the battle can start");
+        Say($"Battle Editor: empty teams got a {allDesigns[0].Name} so the battle can start. Pick the map and start; it won't be in your battle.");
     }
 
     /// Straight down over the middle of `spots`, high enough to see them all (over `fallback` if there are none).
@@ -561,6 +564,27 @@ public sealed partial class BattleEditor : MonoBehaviour
         if (tool == Tool.Target) Say($"Main target for {selected.Id}: click a tank of the other team.");
     }
 
+    /// The factions to pick designs from: all of them, then each in the list's order (yours first, the game's last).
+    string[] Factions() => new[] { "All" }.Concat(allDesigns.Select(d => Files.FactionOf(d.Path)).Distinct()).ToArray();
+
+    /// The design list cut to the picked faction (the design in hand kept if it's in it).
+    void ShowFaction()
+    {
+        var holding = designs.ElementAtOrDefault(design).Path;
+        if (faction != "All" && !allDesigns.Any(d => Files.FactionOf(d.Path) == faction)) faction = "All";
+        designs = faction == "All" ? allDesigns : allDesigns.Where(d => Files.FactionOf(d.Path) == faction).ToList();
+        design = Math.Max(0, designs.FindIndex(d => d.Path == holding));
+        listTop = 0;
+        PickDesign(design);
+    }
+
+    void StepFaction(int by)
+    {
+        var all = Factions();
+        faction = all[(Array.IndexOf(all, faction) + by + all.Length) % all.Length];
+        ShowFaction();
+    }
+
     void PickDesign(int index)
     {
         design = index;
@@ -595,10 +619,48 @@ public sealed partial class BattleEditor : MonoBehaviour
         Rebuild();
     }
 
+    // Load saved: the battles saved on this map, to pick one from (null: the list is closed).
+    List<(BattleFile Battle, string When)>? savedList;
+    int savedTop;
+
     void LoadSaved()
     {
-        if (LoadFor(map) is { } saved) { file = saved; Select(null); ToTopView(); Say($"Loaded {BattleName}: {file.Units.Count} tanks"); }
-        else Say($"No saved battle named {BattleName} yet (Save makes one).");
+        savedList = Files.SavedBattles().Where(b => string.Equals(b.Battle.Map, map, StringComparison.OrdinalIgnoreCase))
+            .Select(b => (b.Battle, File.GetLastWriteTime(b.Path).ToString("d MMM HH:mm"))).ToList();
+        savedTop = 0;
+        if (savedList.Count == 0) { savedList = null; Say($"No battles saved on {map} yet (Save makes one)."); }
+    }
+
+    void LoadBattle(BattleFile saved)
+    {
+        savedList = null;
+        file = saved;
+        Select(null);
+        ToTopView();
+        Say($"Loaded {BattleName}: {file.Units.Count} tanks");
+    }
+
+    /// The saved battles on this map, newest first, over everything else until one is picked or it's closed.
+    void SavedPanel()
+    {
+        var list = savedList!;
+        int rows = Math.Clamp((int)((Screen.height - 220) / Row) - 3, 3, 14);
+        var box = Panel(new Rect((Screen.width - 560) / 2f, 90, 560, (rows + 3) * Row + 2 * Pad));
+        float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
+        Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
+        GUI.Label(Line(0, w - 90), $"Battles saved on {map} ({list.Count}): click one to load it");
+        Button(Line(w - 85, 85), "Close", () => savedList = null);
+        y += Row + 4;
+        for (int i = savedTop; i < Math.Min(list.Count, savedTop + rows); i++, y += Row)
+        {
+            var (b, when) = list[i];
+            int rules = b.Mission?.Rules.Count ?? 0;
+            string extra = (rules > 0 ? $", {rules} rules" : "") + (b.Cinema?.Cameras.Count > 0 ? ", cinematic" : "");
+            Button(Line(0, w), $"{Short(b.Name, 34)}    {b.Units.Count(u => u.Team == 0)} vs {b.Units.Count(u => u.Team == 1)}{extra}    {when}", () => LoadBattle(b));
+        }
+        scrollers.Add((box, by => savedTop = Math.Clamp(savedTop - by, 0, Math.Max(0, list.Count - rows))));
+        y = box.y + box.height - Row - Pad;
+        GUI.Label(Line(0, w), (list.Count > rows ? $"{savedTop + 1}-{Math.Min(list.Count, savedTop + rows)} of {list.Count}, the wheel scrolls. " : "") + "Esc closes.");
     }
 
     // ---------- markers ----------
@@ -779,13 +841,6 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     static string PathFor(string name) => Files.BattlePath(name);
 
-    BattleFile? LoadFor(string map)
-    {
-        var path = PathFor(BattleName);
-        if (!File.Exists(path)) return null;
-        return Files.ReadBattle(path);
-    }
-
     void Save()
     {
         file.Map = map;
@@ -874,6 +929,7 @@ public sealed partial class BattleEditor : MonoBehaviour
     {
         buttons.Clear();
         if (previewing) { PreviewPanel(); return; }
+        if (savedList != null) { SavedPanel(); return; }
         var tabs = new Rect(16, 56 - Row - 4, 480, Row);
         float third = (tabs.width - 8) / 3;
         Toggle(new Rect(tabs.x, tabs.y, third, Row - 3), tab == Tab.Tanks, " Tanks", () => SwitchTab(Tab.Tanks));
@@ -923,7 +979,15 @@ public sealed partial class BattleEditor : MonoBehaviour
         Toggle(Line(90, 150), team == 0, " Team 1 (blue)", () => team = 0);
         Toggle(Line(250, 150), team == 1, " Team 2 (red)", () => team = 1);
         y += Row;
-        GUI.Label(Line(0, w - 130), designs.Count == 0 ? "No designs in My Games\\Sprocket\\Factions" : "Design (click one; the wheel scrolls):");
+        if (allDesigns.Count == 0) GUI.Label(Line(0, w - 130), "No designs in My Games\\Sprocket\\Factions");
+        else
+        {
+            // The faction: click its name (or >) for the next, < for the one before.
+            GUI.Label(Line(0, 58), "Faction:");
+            Button(Line(60, 26), "<", () => StepFaction(-1));
+            Button(Line(90, w - 250), $"{Short(faction, 22)} ({designs.Count})", () => StepFaction(1));
+            Button(Line(w - 156, 26), ">", () => StepFaction(1));
+        }
         Button(Line(w - 125, 60), "Up", () => listTop = Math.Max(0, listTop - ListRows));
         Button(Line(w - 60, 60), "Down", () => listTop = Math.Min(Math.Max(0, designs.Count - ListRows), listTop + ListRows));
         y += Row;

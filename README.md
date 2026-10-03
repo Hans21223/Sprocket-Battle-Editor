@@ -23,7 +23,11 @@ With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../..
   - **New battle**: pick a map, and the editor opens on it.
   - **Quick battle**: nothing to set up. Choose the map (or any), 1 to 8 tanks a side and whose designs (yours, the
     game's tanks, or both), then Start: each tank is a random pick, starting where the game spawns it. Not saved.
-  - **Click a battle** for its actions: Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Delete.
+  - **Click a battle** for its actions: Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Share, Delete.
+  - **Share** writes the battle as one `.zip` in `My Games\Sprocket\Battles\Shared` (and opens that folder): the
+    battle, every design of yours it uses, and their custom paint and decal pictures. Send that file.
+  - **Import a shared battle** lists the shared battles in that folder and in Downloads; click one to put it in. Its
+    designs go into a faction of their own, "Shared battles" (one you already have from before is used again).
   - Starting goes through the game's Custom Battle screen behind a plain "Starting…" cover, filled in for you.
 - **F9** in any custom battle opens the editor; **F10** opens the command view.
 
@@ -41,7 +45,9 @@ cancel) leaves the editor for the game's pause menu.
   for, stopping to fire or firing on the move), and **Reserve** (kept off the map until a rule brings its team's
   reserves in). The path points show about when the tank gets to each.
 - Your designs come from `Documents\My Games\Sprocket\Factions`; the game's own vehicles (its AT guns, scenario and
-  historical tanks) are listed too, marked "(base game)".
+  historical tanks) are listed too, marked "(base game)". **Faction** (< and >, or click its name) shows one faction's
+  designs, the game's own ("Base game"), or all of them.
+- **Load saved** (Ctrl+L) lists the battles saved on this map, newest first; click one to load it, Esc to close.
 
 **Mission**
 - **Zones** (named circles), **AT mines** (the game's own mine), **hedgehogs** (break like the game's), **concrete
@@ -80,7 +86,7 @@ tank: the arrow keys drive, the turret and gun follow the mouse (or the sliders)
 | Editor | W A S D, R / F (Shift: faster) | Fly |
 | Editor | Tab, 1 / 2 | Next design, team |
 | Editor | Q / E, Delete | Turn, remove the picked tank |
-| Editor | Ctrl+S / Ctrl+L, T | Save / load, top view |
+| Editor | Ctrl+S / Ctrl+L, T | Save / the saved battles on this map, top view |
 | Editor | Enter | Play |
 | Editor | Esc | Cancel a tool, or leave for the pause menu |
 | Command view | Space, Esc | Pause; drop the selection, or leave for the pause menu |
@@ -102,6 +108,7 @@ partly:
 - The game's AT guns placed as units in a custom battle.
 - Force control's steering direction; the cinematic tank keys' aim at and shoot at.
 - Clouds / Fog from the menu, renaming and descriptions there.
+- Sharing and importing battles, the faction picker, the saved battles list.
 - The turret turn times (the turret's speed unit is inferred) and the drive corrections.
 - The tanks' shapes in the editor.
 

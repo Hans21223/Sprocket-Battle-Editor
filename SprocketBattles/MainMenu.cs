@@ -57,7 +57,7 @@ internal static partial class MainMenu
 
     static void CloseMenu()
     {
-        actionsFor = -1; quickOpen = false; typingKey = null; typingDone = null; // the dropdowns closed for next time
+        actionsFor = -1; quickOpen = false; importOpen = false; typingKey = null; typingDone = null; // the dropdowns closed for next time
         CloseScreen();
         if (canvas != null) { canvas.SetActive(false); UnityEngine.Object.Destroy(canvas); }
         canvas = null;
@@ -385,6 +385,44 @@ internal static partial class MainMenu
         File.WriteAllText(Files.BattlePath(copy.Name), copy.ToJson());
         picked = 0; top = 0;
         Open();
+    }
+
+    // Import a shared battle's dropdown: the shared battles found when it opened.
+    static bool importOpen;
+    static List<string>? sharedZips;
+
+    /// A battle written as one zip to send (its designs and decal pictures in it), its folder opened.
+    static void Share(BattleFile b)
+    {
+        try
+        {
+            var zip = Sharing.Export(b, Files.Root, Files.Shared);
+            Trace.Write($"menu: shared '{b.Name}' as {zip} ({new FileInfo(zip).Length / 1024} KB)");
+            Tell($"Shared as \"{Path.GetFileName(zip)}\" in My Games\\Sprocket\\Battles\\Shared (opened): send that file.");
+            OpenFolder(Files.Shared);
+        }
+        catch (Exception ex) { Trace.Write($"menu: sharing '{b.Name}' failed: {ex}"); Tell($"Couldn't share it: {ex.Message}"); }
+    }
+
+    /// A shared battle put in (Sharing.Import), then the list shown with it at the top.
+    static void Import(string zip)
+    {
+        try
+        {
+            var (battle, path, added, reused) = Sharing.Import(zip, Files.Root, Files.BattlePath);
+            Trace.Write($"menu: put in {zip} as {path}: {added} designs added, {reused} already there");
+            importOpen = false; sharedZips = null; picked = 0; top = 0;
+            Open();
+            Tell($"{battle.Name} is in your battles. " +
+                 (added > 0 ? $"{added} of its designs went into the {Sharing.Faction} faction." : "Its designs were already there."));
+        }
+        catch (Exception ex) { Trace.Write($"menu: putting in {zip} failed: {ex}"); Tell($"Couldn't put it in: {ex.Message}"); }
+    }
+
+    static void OpenFolder(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        Application.OpenURL(new Uri(dir + Path.DirectorySeparatorChar).AbsoluteUri);
     }
 
     static void Rename(string path, BattleFile b, string name)

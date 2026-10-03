@@ -15,7 +15,7 @@ public sealed partial class BattleEditor
     int atGun, atTeam = 1;               // the AT gun the AT gun tool places, and for which team
 
     /// The AT guns to place: the game's own (its scenarios' AT guns) and your designs named like one.
-    List<(string Path, string Name)> ATGuns() => designs.Where(d => Files.IsATGun(d.Path)).ToList();
+    List<(string Path, string Name)> ATGuns() => allDesigns.Where(d => Files.IsATGun(d.Path)).ToList();
     int rulesTop;
     float nextMarks;
     bool marksDirty;
