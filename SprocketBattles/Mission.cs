@@ -1,5 +1,6 @@
 using Sprocket.Vehicles;
 using UnityEngine;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace SprocketBattles;
 
@@ -313,14 +314,16 @@ internal static class Mission
 }
 
 /// Explosions to see and hear (mines, artillery): the burst the game's own HE shells make on the ground
-/// (ProjectileEffectConfig, the shell impact effect with its sound), as big as a shell of a calibre to match the blast;
-/// the game's explosion effect if no shell effect is loaded.
+/// (ProjectileEffectConfig, the shell impact effect with its sound) and the dirt a shell throws up there, as big as a
+/// shell of a calibre to match the blast, with a flash; the game's explosion effect if no shell effect is loaded.
 internal static class Effects
 {
     static Sprocket.Vehicles.Weapons.ProjectileEffectConfig? shells;
     static GameObject? prefab;
     static float lookedAt = -100;
+    static bool toldUnsized;
     static readonly List<(Vector3 At, float Power, float When)> pending = new();
+    static readonly List<(HDAdditionalLightData Light, float Peak, float Start)> flashes = new();
 
     internal static void Explode(Vector3 at, float power, float after)
     {
@@ -336,12 +339,14 @@ internal static class Effects
         }
         if (shells != null)
         {
-            shells.PlayEffect(new Sprocket.DamageModelling.ProjectileEffectInfo
-            {
-                Type = Sprocket.DamageModelling.ProjectileEffectType.Explosion,
-                Position = at, HitNormal = Vector3.up, HitVelocity = Vector3.down * 300,
-                Calibre = (ushort)Mission.Calibre(power),
-            });
+            int calibre = Mission.Calibre(power);
+            foreach (var type in new[] { Sprocket.DamageModelling.ProjectileEffectType.Explosion, Sprocket.DamageModelling.ProjectileEffectType.EnvironmentImpact })
+                shells.PlayEffect(new Sprocket.DamageModelling.ProjectileEffectInfo
+                {
+                    Type = type, Position = at, HitNormal = Vector3.up, HitVelocity = Vector3.down * 300, Calibre = (ushort)calibre,
+                });
+            Size(at, calibre / 75f);
+            Flash(at, calibre);
             return;
         }
         if (prefab != null)
@@ -354,8 +359,41 @@ internal static class Effects
         }
     }
 
+    /// The game sizes a shell's burst calibre / 75 mm, but 1.25 at most (from about 94 mm up they all look alike), set on
+    /// the effect as it plays: the bursts just played here sized again without that cap. The game's own shells keep it.
+    static void Size(Vector3 at, float scale)
+    {
+        if (scale <= 1.25f) return;
+        int sized = 0;
+        foreach (var e in UnityEngine.Object.FindObjectsOfType<Sprocket.Vehicles.Weapons.ProjectileImpactEffect>())
+            if ((e.transform.position - at).sqrMagnitude < 1) { e.transform.localScale = Vector3.one * scale; sized++; }
+        if (sized == 0 && !toldUnsized) { toldUnsized = true; Trace.Write("effects: the shell bursts weren't found where they played, so they keep the game's size"); }
+    }
+
+    /// A flash of light, brighter and wider for a bigger shell, gone in about half a second.
+    static void Flash(Vector3 at, int calibre)
+    {
+        var o = new GameObject("Battle Editor blast flash");
+        o.transform.position = at + Vector3.up * 2;
+        var light = o.AddHDLight(LightType.Point);
+        o.GetComponent<Light>().color = new Color(1f, 0.72f, 0.42f);
+        light.range = calibre * 0.4f;
+        float k = calibre / 75f;
+        float peak = 3e7f * k * k;
+        light.SetIntensity(peak, UnityEngine.Rendering.LightUnit.Lumen);
+        flashes.Add((light, peak, Time.time));
+        UnityEngine.Object.Destroy(o, 1);
+    }
+
     internal static void Update()
     {
+        for (int i = flashes.Count - 1; i >= 0; i--)
+        {
+            var (light, peak, start) = flashes[i];
+            float t = Time.time - start;
+            if (light == null || t > 0.8f) { flashes.RemoveAt(i); continue; }
+            light.SetIntensity(peak * MathF.Exp(-t / 0.12f));
+        }
         if (pending.Count == 0) return;
         foreach (var p in pending.Where(p => Time.time >= p.When).ToList())
         {
