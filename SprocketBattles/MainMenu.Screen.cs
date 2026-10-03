@@ -333,7 +333,10 @@ internal static partial class MainMenu
         string key = typingKey!;
         var done = typingDone;
         label.alpha = 1;
+        // An object takes one clickable part: the line's button goes (the line is made again when typing ends).
+        if (item.GetComponent<Button>() is { } button) UnityEngine.Object.DestroyImmediate(button);
         var field = item.AddComponent<TMP_InputField>();
+        if (field == null) { Trace.Write("menu: couldn't type on the line"); StopTyping(); return; }
         field.textViewport = label.rectTransform;
         field.textComponent = label;
         field.lineType = TMP_InputField.LineType.SingleLine;
