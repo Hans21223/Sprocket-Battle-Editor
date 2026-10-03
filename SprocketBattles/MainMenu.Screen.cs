@@ -114,6 +114,10 @@ internal static partial class MainMenu
             title.enableAutoSizing = true;
             title.rectTransform.sizeDelta = new Vector2(380, title.rectTransform.sizeDelta.y);
         }
+        // The list grows with its lines, so the game's scroll view scrolls a long one (the game's few scenarios fit
+        // its fixed height; more battles than that went off the bottom).
+        if (screen.selectContent.GetComponent<ContentSizeFitter>() == null)
+            screen.selectContent.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         if (screen.returnButton != null)
         {
             screen.returnButton.onClick = new Button.ButtonClickedEvent();
@@ -156,6 +160,9 @@ internal static partial class MainMenu
                     () => { quickMap = quickMap + 1 >= mapNames.Count ? -1 : quickMap + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
                 wanted.Add(("quick size", $"      Tanks a side: {QuickSizes[quickSize]}", () => { quickSize = (quickSize + 1) % QuickSizes.Length; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
                 wanted.Add(("quick designs", "      Designs: " + QuickPools[quickPool], () => { quickPool = (quickPool + 1) % QuickPools.Length; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+                var eraNames = Files.EraList().Select(e => e.Name).ToList();
+                wanted.Add(("quick era", "      Era: " + (quickEra < 0 || quickEra >= eraNames.Count ? "any" : eraNames[quickEra]),
+                    () => { quickEra = quickEra + 1 >= eraNames.Count ? -1 : quickEra + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
                 wanted.Add(("quick start", "      Start", QuickBattle, ShowQuick, false));
             }
             wanted.Add(("import", "Import a shared battle", () =>
@@ -192,12 +199,16 @@ internal static partial class MainMenu
                 {
                     if (v.Trim().Length > 0 && v.Trim() != b.Name) Rename(path, b, v); else Fill();
                 }), () => ShowBattle(index), false));
-                wanted.Add(("describe", "      Description: " + (b.Description.Length == 0 ? "(click to write one)" : b.Description.Length > 28 ? b.Description[..26] + "..." : b.Description),
-                    () => StartTyping("describe", b.Description, v =>
+                // Typed over in place; what the battle shows behind (description, objectives, fail conditions).
+                void Text(string key, string label, string now, string none, Action<string> set) =>
+                    wanted.Add((key, $"      {label}: {(now.Length == 0 ? none : now)}", () => StartTyping(key, now, v =>
                     {
-                        b.Description = v.Trim(); Save(path, b);
+                        set(v.Trim()); Save(path, b);
                         shownKey = null; Fill(); ShowBattle(index);
                     }), () => ShowBattle(index), false));
+                Text("describe", "Description", b.Description, "(click to write)", v => b.Description = v);
+                Text("objective", "Objectives", b.Objective, "(from its rules)", v => b.Objective = v);
+                Text("failure", "Fails if", b.Failure, "(from its rules)", v => b.Failure = v);
                 wanted.Add(("clouds", $"      Clouds: {b.Clouds}", () => { b.Clouds = Next(CloudNames, b.Clouds); Save(path, b); Fill(); }, () => ShowBattle(index), false));
                 wanted.Add(("fog", $"      Fog: {b.Fog}", () => { b.Fog = Next(FogNames, b.Fog); Save(path, b); Fill(); }, () => ShowBattle(index), false));
                 wanted.Add(("duplicate", "      Duplicate", () => Duplicate(b), () => ShowBattle(index), false));
@@ -228,6 +239,9 @@ internal static partial class MainMenu
             if (typingKey == w.Key) TypeInto(item);
             else if (item.GetComponentInChildren<TMP_Text>() is { } label)
             {
+                // One line each, cut with "..." where it doesn't fit (a long one wrapped over the line under it).
+                label.enableWordWrapping = false;
+                label.overflowMode = TextOverflowModes.Ellipsis;
                 label.text = w.Text;
                 label.alpha = w.Dim ? 0.55f : 1; // the picked battle greyed, as the game shows the scenario picked
             }
@@ -283,15 +297,19 @@ internal static partial class MainMenu
     {
         bool game = d.Path.StartsWith("game:", StringComparison.OrdinalIgnoreCase);
         if (game ? Files.IsATGun(d.Path) || d.Name.Contains("Target") : d.Name.StartsWith("Autosave")) return false;
+        if (QuickEra() is { } era && Files.EraOf(d.Path) != era) return false;
         return quickPool == 2 || (quickPool == 0) != game;
     }).ToList();
+
+    static int quickEra = -1; // the era quick battle tanks are picked from (-1: any)
+    static string? QuickEra() => Files.EraList().ElementAtOrDefault(quickEra)?.Name;
 
     static void ShowQuick()
     {
         var maps = MapList();
         bool chosen = quickMap >= 0 && quickMap < maps.Count;
-        Show($"quick {quickMap} {quickSize} {quickPool}", "Quick battle",
-             $"{QuickSizes[quickSize]} vs {QuickSizes[quickSize]} tanks, each picked at random from {QuickDesigns().Count} designs ({QuickPools[quickPool]}), " +
+        Show($"quick {quickMap} {quickSize} {quickPool} {quickEra}", "Quick battle",
+             $"{QuickSizes[quickSize]} vs {QuickSizes[quickSize]} tanks, each picked at random from {QuickDesigns().Count} designs ({QuickPools[quickPool]}{(QuickEra() is { } e ? ", " + e : "")}), " +
              $"on {(chosen ? maps[quickMap].Map : "a map picked at random")}. They start where the game spawns them, and nothing is saved.",
              new[] { "Destroy every enemy tank" }, new[] { "Lose all vehicles" }, new[] { "QUICK BATTLE" },
              chosen ? SplashPath(maps[quickMap].Map, scenario: true) : maps.Count > 0 ? maps[0].ScenarioSplash : "");
@@ -404,8 +422,8 @@ internal static partial class MainMenu
         if (m != null && m.Mines.Count > 0) parts.Add($"{m.Mines.Count} mines.");
         if (b.Cinema?.Cameras.Count > 0) parts.Add($"A {b.Cinema.Length:0} s cinematic plays as it starts.");
         var rules = m?.Rules ?? new();
-        var wins = rules.Where(r => r.Then.Do == "victory").Select(r => Condition(r, m!)).ToArray();
-        var losses = rules.Where(r => r.Then.Do == "defeat").Select(r => Condition(r, m!)).ToArray();
+        var wins = b.Objective.Length > 0 ? BattleFile.Lines(b.Objective) : rules.Where(r => r.Then.Do == "victory").Select(r => Condition(r, m!)).ToArray();
+        var losses = b.Failure.Length > 0 ? BattleFile.Lines(b.Failure) : rules.Where(r => r.Then.Do == "defeat").Select(r => Condition(r, m!)).ToArray();
         Show("battle " + path, b.Name, string.Join(" ", parts),
              wins.Length > 0 ? wins : new[] { "Destroy every enemy tank" },
              losses.Length > 0 ? losses : new[] { "Lose all vehicles" },

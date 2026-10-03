@@ -6,13 +6,20 @@ Needs the Sprocket Mod Loader (BepInEx 6 IL2CPP). Add the zip in Sprocket Mod Ma
 the Sprocket folder.
 
 START
-- Main menu > Battle Editor (under Custom Battle): your battles on the game's Scenarios screen. New battle picks
-  a map and opens the editor; Quick battle starts random tanks a side on a map with nothing to set up. Click a battle for Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Delete.
+- Main menu > Battle Editor (under Custom Battle): your battles on the game's Scenarios screen (the list scrolls).
+  New battle picks a map and opens the editor; Quick battle starts random tanks a side (any map, any era) with
+  nothing to set up. Click a battle for Play, Edit, Rename, Description, Objectives, Fails if, Clouds, Fog,
+  Duplicate, Share, Delete.
+- Share writes the battle as one zip in Documents\My Games\Sprocket\Battles\Shared, with the designs of yours it uses
+  and their paint and decal pictures. Import a shared battle puts one in from there or from Downloads; its designs
+  go into a faction of their own, "Shared battles".
 - In any custom battle: F9 opens the editor, F10 the command view.
 
 THE EDITOR (F9)
-- Tanks: click the ground to place a design for a team (drag to point it), drag to move, Q / E to turn, Delete to
-  remove. Per tank: who drives it, a path, a main target, reserve. Play restarts the battle with your tanks.
+- Tanks: pick a faction and an era (the game's eras, custom ones too), then a design; click the ground to place it
+  for a team (drag to point it), drag to move, Q / E to turn, Delete to remove. A tank shows as its design's shape
+  once that design has been in a battle. Per tank: who drives it, a path, a main target, reserve. Play restarts the
+  battle with your tanks. Load saved lists the battles saved on the map.
 - Mission: zones, AT mines, hedgehogs, concrete blocks, the game's AT guns, and rules ("when this happens, do that":
   messages, victory, defeat, artillery with a shell size, reserves, drive to a zone).
 - Cinematic: cameras with keys (follow and look at a tank), cuts, a timeline with an End mark, Preview, and tank keys
@@ -24,7 +31,8 @@ Select any tanks (left click or a box), right click to move or attack, Space pau
 keys drive, the mouse aims, G fires.
 
 FILES
-Battles: Documents\My Games\Sprocket\Battles\<name>.json. Drive and turret times per design:
-BepInEx\config\SprocketBattles-travel.json. Log for bug reports: BepInEx\SprocketBattles-trace.log.
+Battles: Documents\My Games\Sprocket\Battles\<name>.json; shared ones: Battles\Shared. Drive and turret times per
+design: BepInEx\config\SprocketBattles-travel.json. Design shapes: BepInEx\cache\SprocketBattles-shapes. Log for bug
+reports: BepInEx\SprocketBattles-trace.log.
 
-This is a pre-release: some parts haven't been tried in the game yet. Report problems on GitHub with the log.
+This is an alpha: some parts haven't been tried in the game yet. Report problems on GitHub with the log.

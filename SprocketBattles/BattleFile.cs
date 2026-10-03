@@ -14,7 +14,14 @@ public sealed class BattleFile
     public string Name { get; set; } = "";
     /// A line or two about it, shown on the Battle Editor's menu.
     public string Description { get; set; } = "";
+    /// The objectives and fail conditions the menu shows, as written (several split by ";"); empty: worked out from the
+    /// mission's victory and defeat rules (or the game's own, a fight to the last tank).
+    public string Objective { get; set; } = "";
+    public string Failure { get; set; } = "";
     public string Map { get; set; } = "";
+
+    /// A written objective or fail condition as its lines.
+    public static string[] Lines(string text) => text.Split(';').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
     /// The weather, by the Custom Battle screen's names (maps whose weather is fixed ignore it).
     public string Clouds { get; set; } = "Clear";
     public string Fog { get; set; } = "None";

@@ -82,6 +82,33 @@ static class BattleTests
         Check(enters.ActionZone(zoned)?.Id == "z1", "a picked zone is kept");
         Check(new Rule().ActionZone(new MissionData()) == null, "no zones: none");
 
-        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal, at-spawn, action zones");
+        // Objectives and fail conditions as written, several split by ";"; an older file has none (its rules say).
+        var told = BattleFile.FromJson(new BattleFile { Objective = "Hold the bridge; Keep the convoy alive", Failure = "Lose the bridge" }.ToJson());
+        Check(BattleFile.Lines(told.Objective).SequenceEqual(new[] { "Hold the bridge", "Keep the convoy alive" }) && told.Failure == "Lose the bridge", "objectives read back, split");
+        Check(BattleFile.FromJson("{\"map\": \"Fields\"}").Objective == "", "an older file has no written objectives");
+
+        // Eras as the game's files have them (trailing commas and all), a custom one among them; a design's by its date.
+        var eraDir = Path.Combine(Path.GetTempPath(), "sb-eras-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(eraDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(eraDir, "Midwar.json"), "{\n  \"name\": \"Midwar\",\n  \"start\": \"1942.01.01\",\n  \"playable\": true,\n}");
+            File.WriteAllText(Path.Combine(eraDir, "Earlywar.json"), "{ \"name\": \"Earlywar\", \"start\": \"1939.09.02\", }");
+            File.WriteAllText(Path.Combine(eraDir, "My Era.json"), "{ \"name\": \"Atomic\", \"start\": \"1950.01.01\" }");
+            File.WriteAllText(Path.Combine(eraDir, "broken.json"), "not json");
+            var eras = Eras.Read(eraDir);
+            Check(eras.Select(e => e.Name).SequenceEqual(new[] { "Earlywar", "Midwar", "Atomic" }), "eras read oldest first, a custom one too, a broken file left out");
+            Check(Eras.Of(eras, new DateTime(1941, 12, 31)) == "Earlywar" && Eras.Of(eras, new DateTime(1942, 1, 1)) == "Midwar"
+                  && Eras.Of(eras, new DateTime(1960, 1, 1)) == "Atomic" && Eras.Of(eras, new DateTime(1930, 1, 1)) == null, "a date's era");
+            var design = Path.Combine(eraDir, "T.blueprint");
+            File.WriteAllText(design, "{\n  \"v\": \"2.0\",\n  \"header\": {\n    \"name\": \"T\",\n    \"creationDate\": \"1945.09.02\",\n  }\n}");
+            var older = Path.Combine(eraDir, "Old.blueprint");
+            File.WriteAllText(older, "{ \"header\": { \"name\": \"Old\", \"era\": \"midwar\" } }");
+            Check(Eras.Of(eras, design) == "Midwar", "a design's era by its date (1945 is before the custom 1950 one)");
+            Check(Eras.Of(eras, older) == "Midwar" && Eras.Of(eras, Path.Combine(eraDir, "none.blueprint")) == null, "an older design's by the era it names");
+        }
+        finally { Directory.Delete(eraDir, true); }
+
+        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal, at-spawn, action zones, objectives, eras");
     }
 }

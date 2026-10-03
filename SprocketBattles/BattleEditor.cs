@@ -23,6 +23,7 @@ public sealed partial class BattleEditor : MonoBehaviour
     List<(string Path, string Name)> designs = new();    // the picked faction's (every one's for "All")
     List<(string Path, string Name)> allDesigns = new();
     static string faction = "All";
+    static string era = "All";
     int design;
     int team;
     string status = "";
@@ -567,23 +568,24 @@ public sealed partial class BattleEditor : MonoBehaviour
     /// The factions to pick designs from: all of them, then each in the list's order (yours first, the game's last).
     string[] Factions() => new[] { "All" }.Concat(allDesigns.Select(d => Files.FactionOf(d.Path)).Distinct()).ToArray();
 
-    /// The design list cut to the picked faction (the design in hand kept if it's in it).
+    /// The eras to pick designs from: all, then the game's (its own and custom ones), oldest first.
+    static string[] EraNames() => new[] { "All" }.Concat(Files.EraList().Select(e => e.Name)).ToArray();
+
+    /// The design list cut to the picked faction and era (the design in hand kept if it's in it).
     void ShowFaction()
     {
         var holding = designs.ElementAtOrDefault(design).Path;
         if (faction != "All" && !allDesigns.Any(d => Files.FactionOf(d.Path) == faction)) faction = "All";
-        designs = faction == "All" ? allDesigns : allDesigns.Where(d => Files.FactionOf(d.Path) == faction).ToList();
+        if (!EraNames().Contains(era)) era = "All";
+        designs = allDesigns.Where(d => (faction == "All" || Files.FactionOf(d.Path) == faction) && (era == "All" || Files.EraOf(d.Path) == era)).ToList();
         design = Math.Max(0, designs.FindIndex(d => d.Path == holding));
         listTop = 0;
         PickDesign(design);
     }
 
-    void StepFaction(int by)
-    {
-        var all = Factions();
-        faction = all[(Array.IndexOf(all, faction) + by + all.Length) % all.Length];
-        ShowFaction();
-    }
+    static string Step(string[] all, string now, int by) => all[(Array.IndexOf(all, now) + by + all.Length) % all.Length];
+    void StepFaction(int by) { faction = Step(Factions(), faction, by); ShowFaction(); }
+    void StepEra(int by) { era = Step(EraNames(), era, by); ShowFaction(); }
 
     void PickDesign(int index)
     {
@@ -868,9 +870,9 @@ public sealed partial class BattleEditor : MonoBehaviour
     // The panels: the editor's own (left), the selected tank's or the tab's (right). Clicks on them don't reach the map.
     const float Row = 26, Pad = 8;
     int listTop;
-    static int ListRows => Math.Clamp((int)((Screen.height - 56 - 9 * Row - 40) / Row), 4, 16);
-    static Rect MainPanel => new(16, 56, 480, (7 + ListRows) * Row + 2 * Pad);
-    static Rect ListArea => new(16 + Pad, 56 + Pad + 4 * Row, 480 - 2 * Pad, ListRows * Row);
+    static int ListRows => Math.Clamp((int)((Screen.height - 56 - 10 * Row - 40) / Row), 4, 16);
+    static Rect MainPanel => new(16, 56, 480, (8 + ListRows) * Row + 2 * Pad);
+    static Rect ListArea => new(16 + Pad, 56 + Pad + 5 * Row, 480 - 2 * Pad, ListRows * Row);
     static Rect SelectedPanel => new(Screen.width - 16 - 360, 56, 360, 10 * Row + 2 * Pad);
 
     static bool Inside(Rect r, Vector2 p) => p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
@@ -990,6 +992,15 @@ public sealed partial class BattleEditor : MonoBehaviour
         }
         Button(Line(w - 125, 60), "Up", () => listTop = Math.Max(0, listTop - ListRows));
         Button(Line(w - 60, 60), "Down", () => listTop = Math.Min(Math.Max(0, designs.Count - ListRows), listTop + ListRows));
+        y += Row;
+        if (allDesigns.Count > 0)
+        {
+            GUI.Label(Line(0, 58), "Era:");
+            Button(Line(60, 26), "<", () => StepEra(-1));
+            Button(Line(90, w - 250), era, () => StepEra(1));
+            Button(Line(w - 156, 26), ">", () => StepEra(1));
+            if (designs.Count == 0) GUI.Label(Line(w - 125, 125), "  none here");
+        }
         y += Row;
         for (int i = listTop; i < Math.Min(designs.Count, listTop + ListRows); i++, y += Row)
         {

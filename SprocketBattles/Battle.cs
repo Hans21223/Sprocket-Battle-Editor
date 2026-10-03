@@ -757,6 +757,25 @@ internal static class Files
         return parts.Length > 2 && parts[0].Equals("Factions", StringComparison.OrdinalIgnoreCase) ? parts[1] : "Other";
     }
 
+    /// The game's eras (StreamingAssets\Eras, custom ones dropped in there too), oldest first; read once.
+    internal static List<Eras.Era> EraList() => eras ??= Eras.Read(Path.Combine(Application.streamingAssetsPath, "Eras"));
+    static List<Eras.Era>? eras;
+
+    /// The era a design is from (by the date in its header, or the era it names), or "No era"; looked up again when
+    /// its file changes.
+    internal static string EraOf(string path)
+    {
+        var file = Absolute(path);
+        long stamp = 0;
+        try { stamp = File.GetLastWriteTimeUtc(file).Ticks; } catch (Exception) { }
+        if (designEras.TryGetValue(file, out var known) && known.Stamp == stamp) return known.Era;
+        var era = Eras.Of(EraList(), file) ?? "No era";
+        designEras[file] = (stamp, era);
+        return era;
+    }
+
+    static readonly Dictionary<string, (long Stamp, string Era)> designEras = new(StringComparer.OrdinalIgnoreCase);
+
     internal static Vector3 Vector(float[] v) => new(v[0], v[1], v[2]);
     internal static float[] Array(Vector3 v) => new[] { v.x, v.y, v.z };
 

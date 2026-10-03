@@ -8,7 +8,7 @@ battle you can also command every tank on the field, or take over one tank's dri
 For **Sprocket 0.2.55.5** with the [Sprocket Mod Loader](https://github.com/Hans21223/Sprocket-Mod-Loader)
 (BepInEx 6 IL2CPP).
 
-> **Pre-release.** Several parts haven't been tried in the game yet; see [Not tried in the game yet](#not-tried-in-the-game-yet).
+> **Alpha.** Several parts haven't been tried in the game yet; see [Not tried in the game yet](#not-tried-in-the-game-yet).
 > Please report what works and what doesn't in [Issues](../../issues).
 
 ## Install
@@ -19,11 +19,15 @@ With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../..
 ## Starting
 
 - **Main menu → Battle Editor** (just under Custom Battle) opens the **Battle Editor** screen: the game's own Scenarios
-  screen, listing your battles. Point at one to see its map, description, objectives and fail conditions.
+  screen, listing your battles (it scrolls when there are many). Point at one to see its map, description, objectives
+  and fail conditions.
   - **New battle**: pick a map, and the editor opens on it.
-  - **Quick battle**: nothing to set up. Choose the map (or any), 1 to 8 tanks a side and whose designs (yours, the
-    game's tanks, or both), then Start: each tank is a random pick, starting where the game spawns it. Not saved.
-  - **Click a battle** for its actions: Play, Edit, Rename, Description, Clouds, Fog, Duplicate, Share, Delete.
+  - **Quick battle**: nothing to set up. Choose the map (or any), 1 to 8 tanks a side, whose designs (yours, the
+    game's tanks, or both) and the era (or any), then Start: each tank is a random pick, starting where the game
+    spawns it. Not saved.
+  - **Click a battle** for its actions: Play, Edit, Rename, Description, Objectives, Fails if, Clouds, Fog, Duplicate,
+    Share, Delete. **Objectives** and **Fails if** are what the menu shows for it (several split by `;`); left empty,
+    they come from the mission's victory and defeat rules.
   - **Share** writes the battle as one `.zip` in `My Games\Sprocket\Battles\Shared` (and opens that folder): the
     battle, every design of yours it uses, and their custom paint and decal pictures. Send that file.
   - **Import a shared battle** lists the shared battles in that folder and in Downloads; click one to put it in. Its
@@ -46,7 +50,9 @@ cancel) leaves the editor for the game's pause menu.
   reserves in). The path points show about when the tank gets to each.
 - Your designs come from `Documents\My Games\Sprocket\Factions`; the game's own vehicles (its AT guns, scenario and
   historical tanks) are listed too, marked "(base game)". **Faction** (< and >, or click its name) shows one faction's
-  designs, the game's own ("Base game"), or all of them.
+  designs, the game's own ("Base game"), or all of them. **Era** does the same by era: the game's own and any custom
+  era files in `Sprocket_Data\StreamingAssets\Eras`, a design's era by the date it was made (or the era an older
+  design names).
 - **Load saved** (Ctrl+L) lists the battles saved on this map, newest first; click one to load it, Esc to close.
 
 **Mission**
@@ -108,7 +114,8 @@ partly:
 - The game's AT guns placed as units in a custom battle.
 - Force control's steering direction; the cinematic tank keys' aim at and shoot at.
 - Clouds / Fog from the menu, renaming and descriptions there.
-- Sharing and importing battles, the faction picker, the saved battles list.
+- Sharing and importing battles, the faction and era pickers, the saved battles list, objectives and fail
+  conditions from the menu, scrolling a long list of battles.
 - The turret turn times (the turret's speed unit is inferred) and the drive corrections.
 - The tanks' shapes in the editor.
 
