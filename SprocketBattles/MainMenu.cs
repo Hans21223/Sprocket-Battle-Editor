@@ -93,6 +93,61 @@ internal static partial class MainMenu
         cover = null;
     }
 
+    /// The menu out of the way of the game's Custom Battle screen, shown as it is for the player to pick tanks on.
+    internal static void Hide() => CloseMenu();
+
+    // ---------- the player picking their tanks on the game's screen ----------
+
+    static GameObject? picker;
+    static UnityAction? pickerClick;
+    static RectTransform? pickerButton;
+    static TextMeshProUGUI? pickerStatus;
+
+    /// Over the game's Custom Battle screen while the player picks their tanks: a Start battle button on the screen's
+    /// own start (that one would start the battle without its tanks placed or its mission) and a line above it on what
+    /// is picked, and what's wrong. Placed in screen pixels each frame, over where the game's button is (PlacePicker).
+    internal static void ShowPicker(Action start)
+    {
+        if (picker != null) return;
+        font ??= TMP_Settings.defaultFontAsset ?? UnityEngine.Object.FindObjectOfType<TextMeshProUGUI>()?.font;
+        picker = new GameObject("Battle Editor picks", new Il2CppReferenceArray<Il2CppSystem.Type>(new[] { Il2CppType.Of<RectTransform>() }));
+        var c = picker.AddComponent<Canvas>();
+        c.renderMode = RenderMode.ScreenSpaceOverlay; c.sortingOrder = 31000;
+        picker.AddComponent<GraphicRaycaster>();
+        pickerButton = Node("Start battle", picker.transform, 0, 0, 200, 60);
+        pickerButton.anchorMin = pickerButton.anchorMax = pickerButton.pivot = Vector2.zero;
+        var image = pickerButton.gameObject.AddComponent<Image>();
+        image.color = Amber;
+        var button = pickerButton.gameObject.AddComponent<Button>();
+        button.targetGraphic = image;
+        // Held here, not in the menu's list (cleared when the menu closes, which it is while this shows).
+        pickerClick = DelegateSupport.ConvertDelegate<UnityAction>(new Action(() => Guard.Run("Battle Editor picks", start)))!;
+        button.onClick.AddListener(pickerClick);
+        var label = Text(pickerButton, "START BATTLE", 0, 0, 200, 60, 22, Dark, TextAlignmentOptions.Center, bold: true);
+        label.rectTransform.anchorMin = Vector2.zero; label.rectTransform.anchorMax = Vector2.one; label.rectTransform.sizeDelta = Vector2.zero;
+        label.rectTransform.anchoredPosition = Vector2.zero;
+        pickerStatus = Text(picker.transform, "", 0, 0, 900, 90, 20, Ink, TextAlignmentOptions.BottomRight);
+        pickerStatus.rectTransform.anchorMin = pickerStatus.rectTransform.anchorMax = pickerStatus.rectTransform.pivot = Vector2.zero;
+        pickerStatus.outlineWidth = 0.2f; pickerStatus.outlineColor = Color.black;
+    }
+
+    /// The button over the game's start (its screen corners: bottom left, top right), the status line over it.
+    internal static void PlacePicker(Vector2 low, Vector2 high, string status, bool wrong)
+    {
+        if (pickerButton == null || pickerStatus == null) return;
+        pickerButton.anchoredPosition = low;
+        pickerButton.sizeDelta = high - low;
+        pickerStatus.rectTransform.anchoredPosition = new Vector2(high.x - 900, high.y + 8);
+        pickerStatus.text = status;
+        pickerStatus.color = wrong ? new Color(1f, 0.55f, 0.4f) : Ink;
+    }
+
+    internal static void HidePicker()
+    {
+        if (picker != null) UnityEngine.Object.Destroy(picker);
+        picker = null; pickerButton = null; pickerStatus = null;
+    }
+
     /// A message on the menu (opened again if it was closed: a battle that couldn't start).
     internal static void Tell(string text)
     {

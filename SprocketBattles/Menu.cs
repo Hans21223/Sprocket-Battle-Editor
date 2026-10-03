@@ -38,22 +38,25 @@ internal static class Menu
 
     // ---------- starting a battle through the Custom Battle screen ----------
 
-    sealed class Launching { public string Map = ""; public BattleFile? File; public bool Play; public int Stage; public float Since; }
+    sealed class Launching { public string Map = ""; public BattleFile? File; public bool Play, Pick; public int Stage; public float Since; public string? Wrong; }
     static Launching? launch;
 
     internal static bool Busy => launch != null;
 
-    /// Start a battle on `map`: to edit (`file`, or a new one) or to play `file` as made.
+    /// Start a battle on `map`: to edit (`file`, or a new one) or to play `file` as made. A battle with Pick tanks to
+    /// play opens the screen as it is, for the player to pick theirs (Picking).
     internal static void Launch(string map, BattleFile? file, bool play)
     {
         if (customBattle == null) { Trace.Write("menu: no Custom Battle button seen, can't start"); MainMenu.Tell("The game's Custom Battle button wasn't found, so battles can't be started."); return; }
-        launch = new Launching { Map = map, File = file, Play = play, Since = Time.unscaledTime };
-        Trace.Write($"menu: {(play ? "playing" : "editing")} '{file?.Name ?? "a new battle"}' on {map}, opening the Custom Battle screen");
-        MainMenu.Cover($"{(play ? "Starting" : "Opening")} {file?.Name ?? map}...");
+        bool pick = play && file != null && file.Slots.Count > 0;
+        launch = new Launching { Map = map, File = file, Play = play, Pick = pick, Since = Time.unscaledTime };
+        Trace.Write($"menu: {(play ? "playing" : "editing")} '{file?.Name ?? "a new battle"}' on {map}, opening the Custom Battle screen{(pick ? $" for {file!.Slots.Count} picks" : "")}");
+        if (pick) MainMenu.Hide();
+        else MainMenu.Cover($"{(play ? "Starting" : "Opening")} {file?.Name ?? map}...");
         customBattle.Invoke();
     }
 
-    internal static void Cancel() => launch = null;
+    internal static void Cancel() { launch = null; MainMenu.HidePicker(); }
 
     /// Every frame while starting: once the Custom Battle screen is up, its map, weather (and for Play, its teams) set;
     /// once it's waiting for its start button, that pressed; pressed again if the screen is still there 2.5 s later.
@@ -79,6 +82,7 @@ internal static class Menu
             if (config != null) Press(l, screen!, config);
             return;
         }
+        if (l.Pick && l.Stage == 1) { Picking(l, screen, config); return; }
         if (Time.unscaledTime - l.Since > 20)
         {
             Trace.Write($"menu: the Custom Battle screen didn't come up in 20 s (stage {l.Stage}), gave up");
@@ -91,7 +95,8 @@ internal static class Menu
         if (l.Stage == 0)
         {
             config.MapName = l.Map;
-            string? error = l.Play && l.File != null ? Battle.Prepare(config.Teams, l.File) : Battle.FillEmpty(config.Teams);
+            string? error = l.Pick ? Battle.PreparePick(config.Teams, l.File!)
+                          : l.Play && l.File != null ? Battle.Prepare(config.Teams, l.File) : Battle.FillEmpty(config.Teams);
             if (error != null) { Trace.Write($"menu: {error}"); launch = null; MainMenu.Uncover(); MainMenu.Tell(error); return; }
             Weather(screen, config, l.File);
             edit!.RaiseDirtyFlags(BattleConfigDirtyFlags.Everything);
@@ -104,6 +109,69 @@ internal static class Menu
         if (Time.unscaledTime - l.Since < (waiting ? 0.8f : 3) || MainMenu.Unloading) return;
         if (!l.Play) { EditNext = true; Opening = l.File; }
         Press(l, screen, config);
+    }
+
+    /// The player picking their tanks on the game's screen (Team 1, its budget and places the battle's): the Battle
+    /// Editor's Start battle button over the screen's own start, with what's picked above it. Leaving the screen (its
+    /// Exit) leaves the picking, back to the Battle Editor's menu.
+    static void Picking(Launching l, CustomBattleCreation? screen, BattleConfig? config)
+    {
+        if (screen == null || config?.Teams == null)
+        {
+            if (Time.unscaledTime - l.Since < 1) return; // the screen coming up again after a change
+            Trace.Write("menu: the Custom Battle screen closed while picking");
+            Cancel();
+            MainMenu.Open();
+            return;
+        }
+        l.Since = Time.unscaledTime;
+        var file = l.File!;
+        var picked = Battle.Picked(config.Teams[0]);
+        MainMenu.ShowPicker(() => StartPicked(l));
+        if (screen.confirmButton?.GetComponent<RectTransform>() is { } start)
+        {
+            var corners = new Vector3[4];
+            start.GetWorldCorners(corners);
+            var lim = file.Limits ?? new PickLimits();
+            string status = l.Wrong ?? $"{file.Name}: pick up to {file.Slots.Count} of your tanks for Team 1 ({picked.Count} picked" +
+                (lim.Budget > 0 ? $", {picked.Sum(p => p.Cost):N0} of {lim.Budget:N0}" : "") + ")" +
+                (lim.MaxCost > 0 ? $"\nEach at most {lim.MaxCost:N0}" : "\n") + (lim.Eras.Count > 0 ? $"{(lim.MaxCost > 0 ? ", " : "")}{PickLimits.Describe(lim.Eras)}" : "");
+            MainMenu.PlacePicker(new Vector2(corners[0].x, corners[0].y), new Vector2(corners[2].x, corners[2].y), status, l.Wrong != null);
+        }
+        if (l.Wrong != null && Time.unscaledTime > wrongUntil) l.Wrong = null;
+    }
+
+    static float wrongUntil;
+
+    /// Start battle: the picks checked against the battle's limits, then put into its Pick tanks (their places, orders
+    /// and parts in the mission kept), the teams made the battle's, and the game's start pressed as for any battle.
+    static void StartPicked(Launching l)
+    {
+        var screen = UnityEngine.Object.FindObjectOfType<CustomBattleCreation>();
+        var config = screen?.ConfigEdit?.Config;
+        if (screen == null || config?.Teams == null || launch != l) return;
+        var picked = Battle.Picked(config.Teams[0]);
+        var file = l.File!;
+        string? error = file.CheckPicks(picked.Select(p => (p.Name, p.Cost, (string?)Files.EraOf(p.Path))).ToList());
+        if (error == null)
+        {
+            var played = file.WithPicks(picked.Select(p => Files.Relative(p.Path)).ToList());
+            Battle.UnpickTeam(config.Teams);
+            error = Battle.Prepare(config.Teams, played);
+            if (error == null)
+            {
+                Trace.Write($"menu: picked {string.Join(", ", picked.Select(p => p.Name))} for '{file.Name}'");
+                l.File = played; l.Pick = false;
+                MainMenu.HidePicker();
+                MainMenu.Cover($"Starting {file.Name}...");
+                screen.ConfigEdit!.RaiseDirtyFlags(BattleConfigDirtyFlags.Everything);
+                Press(l, screen, config);
+                return;
+            }
+        }
+        Trace.Write($"menu: picks turned down: {error}");
+        l.Wrong = error;
+        wrongUntil = Time.unscaledTime + 6;
     }
 
     static void Press(Launching l, CustomBattleCreation screen, BattleConfig config)

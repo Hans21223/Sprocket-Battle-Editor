@@ -80,6 +80,53 @@ internal static class Battle
         return null;
     }
 
+    /// A battle the player picks their own tanks for (the menu's Play, the battle having Pick tanks), on the game's own
+    /// screen: the other team is the battle's; the player's team starts empty, with the battle's budget and as many
+    /// places as Pick tanks. Prepare (with the picks put in) takes over once they press Start battle. A reason, or null.
+    internal static string? PreparePick(Il2CppReferenceArray<TeamDefinition> teams, BattleFile file)
+    {
+        foreach (var u in file.Units.Where(u => u.Team != 0))
+            if (UnitFor(u.Blueprint) == null) return $"Couldn't read the design {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}.";
+        for (int t = 0; t < teams.Length; t++)
+        {
+            teams[t].Units.Clear();
+            if (t == 0) continue;
+            foreach (var group in file.SpawnGroups(t)) teams[t].Units.Add(UnitFor(group[0].Blueprint)!, new UnitInstanceInfo { Count = group.Count });
+        }
+        pickedTeam = (teams[0].Budget, teams[0].maxUnits);
+        teams[0].Budget = Budget(file.Limits?.Budget > 0 ? file.Limits.Budget : -1);
+        teams[0].maxUnits = file.Slots.Count;
+        return null;
+    }
+
+    /// The player's team's own budget and places back (unlimited), before its tanks are made the battle's: Team 1's
+    /// own tanks join the player's picks, which the game would otherwise turn away.
+    internal static void UnpickTeam(Il2CppReferenceArray<TeamDefinition> teams)
+    {
+        if (pickedTeam is not { } was) return;
+        teams[0].Budget = Budget(-1);
+        teams[0].maxUnits = Math.Max(was.MaxUnits, 64);
+        pickedTeam = null;
+    }
+
+    static (Cost Budget, int MaxUnits)? pickedTeam;
+
+    static Cost Budget(int amount) => new(new Il2CppStructArray<int>(new[] { amount }));
+
+    /// The tanks the player has picked on the screen (each as many times as its count): name, design file, cost.
+    internal static List<(string Name, string Path, int Cost)> Picked(TeamDefinition team)
+    {
+        var picked = new List<(string, string, int)>();
+        foreach (var unit in team.Units)
+        {
+            var def = unit.Key;
+            if (def == null) continue;
+            int cost = def.Cost?.quantities is { Length: > 0 } q ? q[0] : 0;
+            for (int i = 0; i < Math.Max(1, unit.Value?.Count ?? 1); i++) picked.Add((def.Name, def.Path, cost));
+        }
+        return picked;
+    }
+
     /// The custom battle's teams made the file's tanks, one unit per design in the order the file spawns them, and
     /// the tanks to place once spawned. A reason it can't, or null.
     static string? Fill(Il2CppReferenceArray<TeamDefinition> teams, BattleFile file)

@@ -1,4 +1,4 @@
-Sprocket Battle Editor 0.16.1 + Map Framework 0.3.1 - for Sprocket 0.2.55.5
+Sprocket Battle Editor 0.17.0 + Map Framework 0.3.1 - for Sprocket 0.2.55.5
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 INSTALL
@@ -21,12 +21,15 @@ START
 - Share writes the battle as one zip in Documents\My Games\Sprocket\Battles\Shared, with the designs of yours it uses
   and their paint and decal pictures. Import a shared battle puts one in from there or from Downloads; its designs
   go into a faction of their own, "Shared battles".
+- A battle with tanks marked "Player picks it" opens the game's Custom Battle screen to play: pick your tanks for
+  Team 1 there (within the battle's budget, cost a tank and eras), then Start battle.
 - In any custom battle: F9 opens the editor, F10 the command view.
 
 THE EDITOR (F9)
 - Tanks: pick a faction and an era (the game's eras, custom ones too), then a design; click the ground to place it
   for a team (drag to point it), drag to move, Q / E to turn, Delete to remove. A tank shows as its design's shape
-  once that design has been in a battle. Per tank: who drives it, a path, a main target, reserve. Play restarts the
+  once that design has been in a battle. Per tank: who drives it, a path, a main target, reserve, and whether the player picks its design (with limits:
+  budget, cost a tank, eras). Play restarts the
   battle with your tanks. Load saved lists the battles saved on the map.
 - Mission: zones, AT mines, hedgehogs, concrete blocks, the game's AT guns, and rules ("when this happens, do that":
   messages, victory, defeat, artillery with a shell size, reserves, drive to a zone).

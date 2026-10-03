@@ -54,6 +54,10 @@ cancel) leaves the editor for the game's pause menu.
   arrow's tip to turn it. Q / E turn it 15° (Shift: 1°), Delete removes it.
 - A placed tank shows as its design's own shape, in its team's colour, once a tank of that design has been in a
   battle (kept in `BepInEx\cache\SprocketBattles-shapes` until the design changes); a box until then.
+- **Player picks it** (Team 1's tanks): the player brings their own design to this tank when the battle is played
+  from the menu. It keeps its place, path, target and part in the mission; the design placed is a stand-in. A cyan
+  disc marks it. The panel under it sets the limits: a **budget** for all of the player's tanks, a cost **each**, and
+  the **eras** taken (a run, custom eras too). How many tanks they bring is how many are marked.
 - Per tank: who drives it (you or the AI), **Path** (points it drives through, in order), **Target** (the tank it goes
   for, stopping to fire or firing on the move), and **Reserve** (kept off the map until a rule brings its team's
   reserves in). The path points show about when the tank gets to each.
@@ -62,6 +66,10 @@ cancel) leaves the editor for the game's pause menu.
   designs, the game's own ("Base game"), or all of them. **Era** does the same by era: the game's own and any custom
   era files in `Sprocket_Data\StreamingAssets\Eras`, a design's era by the date it was made (or the era an older
   design names).
+- Playing a battle with tanks the player picks opens the game's own **Custom Battle screen** as it is: Team 1 starts
+  empty with the battle's budget and places, the enemy is the battle's. Pick your tanks there as in a normal custom
+  battle (faction and era filters, search), then **Start battle** (where the game's start button is): your picks
+  are checked against the limits and go into the marked tanks. Leaving the screen goes back to the menu.
 - **Load saved** (Ctrl+L) lists the battles saved on this map, newest first; click one to load it, Esc to close.
 
 **Mission**
@@ -123,6 +131,7 @@ partly:
 - The game's AT guns placed as units in a custom battle.
 - Force control's steering direction; the cinematic tank keys' aim at and shoot at.
 - Clouds / Fog from the menu, renaming and descriptions there.
+- The player picking their tanks on the Custom Battle screen, and its limits.
 - Sharing and importing battles, the faction and era pickers, the saved battles list, objectives and fail
   conditions from the menu, scrolling a long list of battles.
 - The turret turn times (the turret's speed unit is inferred) and the drive corrections.

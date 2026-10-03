@@ -744,6 +744,8 @@ public sealed partial class BattleEditor : MonoBehaviour
         Block(root, new Vector3(-0.77f, y, front + 2.83f), new Vector3(0.45f, 0.12f, 2.4f), arrow, turn: 40);
         Block(root, new Vector3(0.77f, y, front + 2.83f), new Vector3(0.45f, 0.12f, 2.4f), arrow, turn: -40);
         Block(root, new Vector3(0, y, front + 4.35f), Vector3.one * 1.3f, picked ? Color.yellow : Color.white, new Hit(unit, Part.Tip, 0), PrimitiveType.Sphere);
+        // A cyan disc over a tank the player picks the design of.
+        if (unit.Pick && unit.Team == 0) Block(root, new Vector3(0, top + 1.6f, 0), new Vector3(2.4f, 0.08f, 2.4f), PickColour, shape: PrimitiveType.Cylinder);
         root.transform.SetPositionAndRotation(Files.Vector(unit.Position), Quaternion.Euler(0, unit.Yaw, 0));
         return root;
     }
@@ -873,7 +875,53 @@ public sealed partial class BattleEditor : MonoBehaviour
     static int ListRows => Math.Clamp((int)((Screen.height - 56 - 10 * Row - 40) / Row), 4, 16);
     static Rect MainPanel => new(16, 56, 480, (8 + ListRows) * Row + 2 * Pad);
     static Rect ListArea => new(16 + Pad, 56 + Pad + 5 * Row, 480 - 2 * Pad, ListRows * Row);
-    static Rect SelectedPanel => new(Screen.width - 16 - 360, 56, 360, 10 * Row + 2 * Pad);
+    static Rect SelectedPanel => new(Screen.width - 16 - 360, 56, 360, 11 * Row + 2 * Pad);
+    Rect PicksArea => new(Screen.width - 16 - 360, selected == null ? 56 : SelectedPanel.yMax + 8, 360, 5 * Row + 2 * Pad);
+    static readonly Color PickColour = new(0.2f, 0.85f, 0.95f);
+
+    // ---------- the player's picks ----------
+
+    // The budgets the game's own Custom Battle screen offers, and costs a tank might be held to (0: no limit).
+    static readonly int[] Budgets = { 0, 12000, 40000, 75000, 125000, 250000, 500000 };
+    static readonly int[] TankCosts = { 0, 10000, 20000, 30000, 40000, 50000, 75000, 100000, 150000 };
+
+    static int Next(int[] values, int now, int by) => values[(Math.Max(0, Array.IndexOf(values, now)) + by + values.Length) % values.Length];
+
+    /// How many tanks the player brings (Team 1's marked Pick) and the limits on them: a budget for all of them, a cost
+    /// for each, and a run of eras (the game's, custom ones too).
+    void PicksPanel()
+    {
+        var limits = file.Limits ??= new PickLimits();
+        var box = Panel(PicksArea);
+        float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
+        Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
+        int count = file.Slots.Count;
+        GUI.Label(Line(0, w), $"At Play the player picks {count} tank{(count == 1 ? "" : "s")} (the cyan ones), with:");
+        y += Row;
+        void Stepper(string label, string value, Action<int> step)
+        {
+            GUI.Label(Line(0, 106), label);
+            Button(Line(106, 26), "<", () => step(-1));
+            Button(Line(136, w - 166), value, () => step(1));
+            Button(Line(w - 26, 26), ">", () => step(1));
+            y += Row;
+        }
+        Stepper("Budget:", limits.Budget > 0 ? $"{limits.Budget:N0} in all" : "no limit", by => limits.Budget = Next(Budgets, limits.Budget, by));
+        Stepper("Each tank:", limits.MaxCost > 0 ? $"{limits.MaxCost:N0} at most" : "no limit", by => limits.MaxCost = Next(TankCosts, limits.MaxCost, by));
+        // The eras as a run, from one to another (-1: either end open).
+        var names = Files.EraList().Select(e => e.Name).ToList();
+        int from = limits.Eras.Count == 0 ? -1 : names.IndexOf(limits.Eras[0]), to = limits.Eras.Count == 0 ? -1 : names.IndexOf(limits.Eras[^1]);
+        int Cycle(int i, int by) => (i + 1 + by + names.Count + 1) % (names.Count + 1) - 1;
+        void Eras(int f, int t)
+        {
+            if (f < 0 && t < 0) { limits.Eras = new(); return; }
+            int lo = f < 0 ? 0 : f, hi = t < 0 ? names.Count - 1 : t;
+            if (lo > hi) (lo, hi) = (hi, lo);
+            limits.Eras = names.GetRange(lo, hi - lo + 1);
+        }
+        Stepper("Eras from:", from < 0 ? "any" : names[from], by => Eras(Cycle(from, by), to));
+        Stepper("Eras to:", to < 0 ? "any" : names[to], by => Eras(from, Cycle(to, by)));
+    }
 
     static bool Inside(Rect r, Vector2 p) => p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
 
@@ -949,7 +997,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         if (view != null)
         {
             foreach (var (unit, root) in markers)
-                Tag(root.transform.position + Vector3.up * 4, $"{unit.Id} {System.IO.Path.GetFileNameWithoutExtension(unit.Blueprint)}{(unit.Control == "player" ? " (you)" : "")}");
+                Tag(root.transform.position + Vector3.up * 4, $"{unit.Id} {System.IO.Path.GetFileNameWithoutExtension(unit.Blueprint)}{(unit.Control == "player" ? " (you)" : "")}{(unit.Pick && unit.Team == 0 ? " (player picks)" : "")}");
             if (selected != null)
             {
                 // Each point numbered, with about when the tank gets there (its orders start 2 s in: Battle.StartOrders).
@@ -1021,6 +1069,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         y += Row;
         GUI.Label(Line(0, w), "Right drag: look.  Middle drag: pan.  Wheel: zoom.  W A S D, R / F: fly.");
 
+        if (file.Slots.Count > 0) PicksPanel();
         var chosen = selected;
         if (chosen == null) return;
         box = Panel(SelectedPanel);
@@ -1047,6 +1096,10 @@ public sealed partial class BattleEditor : MonoBehaviour
         Button(Line(2 * (t + 4), t), "Done", () => Select(null));
         y += Row;
         Toggle(Line(0, w), chosen.Reserve, " Reserve: off the map until a mission rule brings its team's reserves", () => { chosen.Reserve = !chosen.Reserve; Rebuild(); });
+        y += Row;
+        if (chosen.Team == 0)
+            Toggle(Line(0, w), chosen.Pick, " Player picks it: their own design here, at Play", () => { chosen.Pick = !chosen.Pick; Rebuild(); });
+        else GUI.Label(Line(0, w), "(Only Team 1's tanks can be picked by the player.)");
         y += Row;
         // Orders: the path it drives, then its main target.
         GUI.Label(Line(0, 110), $"Path: {chosen.Path.Count} points");

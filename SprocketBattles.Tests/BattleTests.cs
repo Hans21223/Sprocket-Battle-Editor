@@ -87,6 +87,30 @@ static class BattleTests
         Check(BattleFile.Lines(told.Objective).SequenceEqual(new[] { "Hold the bridge", "Keep the convoy alive" }) && told.Failure == "Lose the bridge", "objectives read back, split");
         Check(BattleFile.FromJson("{\"map\": \"Fields\"}").Objective == "", "an older file has no written objectives");
 
+        // The player's picks: up to as many as Team 1's Pick tanks, within the limits; put in order, the rest taken out.
+        var open = new BattleFile { Map = "Fields", Limits = new PickLimits { Budget = 100000, MaxCost = 60000, Eras = { "Midwar", "Latewar" } } };
+        open.Units.Add(new BattleUnit { Id = "u1", Blueprint = "Stand-in", Pick = true, Control = "player" });
+        open.Units.Add(new BattleUnit { Id = "u2", Blueprint = "Stand-in", Pick = true });
+        open.Units.Add(new BattleUnit { Id = "u3", Blueprint = "Ally" });
+        open.Units.Add(new BattleUnit { Id = "u4", Team = 1, Blueprint = "Enemy", Pick = true }); // Team 2: never the player's
+        open.Units[2].SetTarget("u4");
+        open.Mission = new MissionData { Rules = { new Rule { When = "destroyed", Unit = "u2", Then = new RuleAction { Do = "defeat" } } } };
+        Check(open.Slots.Select(u => u.Id).SequenceEqual(new[] { "u1", "u2" }), "the slots: Team 1's Pick tanks");
+        Check(open.CheckPicks(new (string, int, string?)[0]) != null, "nothing picked");
+        Check(open.CheckPicks(new[] { ("A", 1, (string?)"Midwar"), ("B", 1, "Midwar"), ("C", 1, "Midwar") })!.Contains("takes 2"), "too many");
+        Check(open.CheckPicks(new[] { ("A", 70000, (string?)"Midwar") })!.Contains("60,000"), "one over the cost a tank");
+        Check(open.CheckPicks(new[] { ("A", 50000, (string?)"Earlywar") })!.Contains("Midwar to Latewar"), "from an era not taken");
+        Check(open.CheckPicks(new[] { ("A", 50000, (string?)null) }) != null, "from no era, when eras are limited");
+        Check(open.CheckPicks(new[] { ("A", 55000, (string?)"Midwar"), ("B", 55000, "Latewar") })!.Contains("110,000"), "over the budget together");
+        Check(open.CheckPicks(new[] { ("A", 45000, (string?)"Midwar"), ("B", 55000, "Latewar") }) == null, "within every limit");
+        var one = open.WithPicks(new[] { "Mine" });
+        Check(one.Units.Select(u => u.Id).SequenceEqual(new[] { "u1", "u3", "u4" }) && one.Units[0].Blueprint == "Mine" && !one.Units[0].Pick
+              && one.Units[0].Control == "player", "one pick: into the first slot (still yours to drive), the second slot gone");
+        Check(one.Mission!.Rules.Count == 0 && open.Units.Count == 4 && open.Units[1].Pick, "the gone slot out of the rules; the battle itself unchanged");
+        var picked = BattleFile.FromJson(open.ToJson());
+        Check(picked.Limits!.Budget == 100000 && picked.Limits.Eras.Count == 2 && picked.Units[1].Pick && !picked.Units[2].Pick, "limits and picks read back");
+        Check(open.ToJson().Split("\"pick\"").Length == 4, "pick written only where set");
+
         // Eras as the game's files have them (trailing commas and all), a custom one among them; a design's by its date.
         var eraDir = Path.Combine(Path.GetTempPath(), "sb-eras-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(eraDir);
@@ -109,6 +133,6 @@ static class BattleTests
         }
         finally { Directory.Delete(eraDir, true); }
 
-        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal, at-spawn, action zones, objectives, eras");
+        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal, at-spawn, action zones, objectives, picks, eras");
     }
 }

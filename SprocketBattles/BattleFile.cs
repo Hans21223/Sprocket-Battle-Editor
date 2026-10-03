@@ -28,6 +28,44 @@ public sealed class BattleFile
     public List<BattleUnit> Units { get; set; } = new();
     public MissionData? Mission { get; set; }
     public CinemaData? Cinema { get; set; }
+    /// What the player may bring to the tanks marked Pick (their own designs, chosen on the game's Custom Battle screen
+    /// before the battle); null: no limits.
+    public PickLimits? Limits { get; set; }
+
+    /// The tanks the player picks the designs of: Team 1's (the player's team) marked Pick, in the file's order.
+    [JsonIgnore] public List<BattleUnit> Slots => Units.Where(u => u.Pick && u.Team == 0).ToList();
+
+    /// What's wrong with the player's picks (each its name, cost and era), or null if they'll do.
+    public string? CheckPicks(IReadOnlyList<(string Name, int Cost, string? Era)> picks)
+    {
+        int slots = Slots.Count;
+        if (picks.Count == 0) return $"Pick your tanks first: this battle takes up to {slots}.";
+        if (picks.Count > slots) return $"This battle takes {slots} of your tanks; you picked {picks.Count}.";
+        var l = Limits ?? new PickLimits();
+        foreach (var p in picks)
+        {
+            if (l.MaxCost > 0 && p.Cost > l.MaxCost) return $"{p.Name} costs {p.Cost:N0}: this battle takes {l.MaxCost:N0} a tank at most.";
+            if (l.Eras.Count > 0 && (p.Era == null || !l.Eras.Contains(p.Era)))
+                return $"{p.Name} is {(p.Era == null ? "from no era" : "a " + p.Era + " design")}: this battle takes {PickLimits.Describe(l.Eras)}.";
+        }
+        int total = picks.Sum(p => p.Cost);
+        if (l.Budget > 0 && total > l.Budget) return $"Your tanks cost {total:N0} together: this battle's budget is {l.Budget:N0}.";
+        return null;
+    }
+
+    /// The battle with the player's designs in its Pick tanks, in order (keeping each tank's place, orders and part in
+    /// the mission and cinematic); Pick tanks left over are taken out.
+    public BattleFile WithPicks(IReadOnlyList<string> blueprints)
+    {
+        var copy = FromJson(ToJson());
+        var slots = copy.Slots;
+        for (int i = 0; i < slots.Count; i++)
+        {
+            if (i < blueprints.Count) { slots[i].Blueprint = blueprints[i]; slots[i].Pick = false; }
+            else copy.Remove(slots[i]);
+        }
+        return copy;
+    }
 
     static readonly JsonSerializerOptions Options = new()
     {
@@ -76,6 +114,19 @@ public sealed class BattleFile
     }
 }
 
+/// The limits on the tanks a player brings: as many as the battle's Pick tanks, each costing at most MaxCost, all of them
+/// at most Budget, and only designs of these Eras. 0 or empty: no limit.
+public sealed class PickLimits
+{
+    public int Budget { get; set; }
+    public int MaxCost { get; set; }
+    public List<string> Eras { get; set; } = new();
+
+    /// "any era", "Midwar", or "Earlywar to Latewar" (the eras are a run, oldest first).
+    public static string Describe(List<string> eras) =>
+        eras.Count == 0 ? "any era" : eras.Count == 1 ? eras[0] + " designs" : $"designs from {eras[0]} to {eras[^1]}";
+}
+
 public sealed class BattleUnit
 {
     public string Id { get; set; } = "";
@@ -88,6 +139,8 @@ public sealed class BattleUnit
     public bool Reserve { get; set; }
     /// Left where the game spawns it instead of moved to Position (a quick battle's tanks).
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool AtSpawn { get; set; }
+    /// The player picks this tank's design before the battle (Team 1 only); Blueprint is the battle maker's stand-in.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool Pick { get; set; }
     /// What the AI does, in order: drive through each "move" point (the path), then go for the "attack" target.
     public List<BattleOrder>? Orders { get; set; }
 

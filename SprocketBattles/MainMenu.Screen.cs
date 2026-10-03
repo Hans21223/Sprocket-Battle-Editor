@@ -418,6 +418,15 @@ internal static partial class MainMenu
         if (b.Description.Length > 0) parts.Add(b.Description);
         parts.Add($"{blue} vs {red} tanks on {b.Map}.");
         if (reserves > 0) parts.Add($"{reserves} held in reserve.");
+        if (b.Slots.Count is var slots and > 0)
+        {
+            var l = b.Limits ?? new PickLimits();
+            var limits = new List<string>();
+            if (l.Budget > 0) limits.Add($"{l.Budget:N0} in all");
+            if (l.MaxCost > 0) limits.Add($"{l.MaxCost:N0} a tank at most");
+            if (l.Eras.Count > 0) limits.Add(PickLimits.Describe(l.Eras));
+            parts.Add($"You bring up to {slots} of your own tanks{(limits.Count > 0 ? ": " + string.Join(", ", limits) : "")}.");
+        }
         if (m != null && m.Rules.Count > 0) parts.Add($"{m.Rules.Count} mission rules.");
         if (m != null && m.Mines.Count > 0) parts.Add($"{m.Mines.Count} mines.");
         if (b.Cinema?.Cameras.Count > 0) parts.Add($"A {b.Cinema.Length:0} s cinematic plays as it starts.");
