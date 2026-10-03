@@ -35,6 +35,8 @@ cancel) leaves the editor for the game's pause menu.
 **Tanks**
 - Click the ground to place the picked design for the picked team (drag to point it). Drag a tank to move it, its
   arrow's tip to turn it. Q / E turn it 15° (Shift: 1°), Delete removes it.
+- A placed tank shows as its design's own shape, in its team's colour, once a tank of that design has been in a
+  battle (kept in `BepInEx\cache\SprocketBattles-shapes` until the design changes); a box until then.
 - Per tank: who drives it (you or the AI), **Path** (points it drives through, in order), **Target** (the tank it goes
   for, stopping to fire or firing on the move), and **Reserve** (kept off the map until a rule brings its team's
   reserves in). The path points show about when the tank gets to each.
@@ -88,6 +90,7 @@ tank: the arrow keys drive, the turret and gun follow the mouse (or the sliders)
 
 - Battles: `Documents\My Games\Sprocket\Battles\<name>.json` (plain JSON, easy to share).
 - Worked-out drive and turret times per design: `BepInEx\config\SprocketBattles-travel.json`.
+- Each design's shape for the markers: `BepInEx\cache\SprocketBattles-shapes`.
 - What the mod did, for bug reports: `BepInEx\SprocketBattles-trace.log`.
 
 ## Not tried in the game yet
@@ -100,6 +103,7 @@ partly:
 - Force control's steering direction; the cinematic tank keys' aim at and shoot at.
 - Clouds / Fog from the menu, renaming and descriptions there.
 - The turret turn times (the turret's speed unit is inferred) and the drive corrections.
+- The tanks' shapes in the editor.
 
 ## Building
 

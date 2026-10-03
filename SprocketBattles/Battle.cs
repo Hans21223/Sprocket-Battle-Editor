@@ -183,6 +183,7 @@ internal static class Battle
                 tanks[order[i].Id] = tank;
                 var unit = order[i];
                 Guard.Run("travel", () => Travel.Learn(unit.Blueprint, gateway, tank.Mass));
+                Guard.Run("shapes", () => Shapes.Learn(unit.Blueprint, root));
             }
         }
         Physics.SyncTransforms();

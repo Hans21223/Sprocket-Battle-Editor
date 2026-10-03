@@ -643,20 +643,43 @@ public sealed partial class BattleEditor : MonoBehaviour
         Physics.SyncTransforms();
     }
 
-    /// A tank's marker: a box the tank's size in its team's colour (lighter when picked), a plate on its front (yellow:
-    /// you drive it), and an arrow over it showing where it points, with a ball at the tip to turn it by.
+    /// A tank's marker: the design's shape (Shapes: once a tank of it has been in a battle; a box the size of a tank
+    /// till then) in its team's colour (lighter when picked), a yellow plate (on the box's front, or over the shape)
+    /// when you drive it, and an arrow over it showing where it points, with a ball at the tip to turn it by.
     GameObject Marker(BattleUnit unit)
     {
         bool picked = unit == selected;
         var colour = unit.Reserve ? Color.Lerp(TeamColours[unit.Team % 2], Color.black, 0.55f) : TeamColours[unit.Team % 2];
+        var body = picked ? Color.Lerp(colour, Color.white, 0.5f) : colour;
         var root = new GameObject("Battle Editor tank " + unit.Id);
-        Block(root, new Vector3(0, 1.1f, 0), new Vector3(3.2f, 2.2f, 6.5f), picked ? Color.Lerp(colour, Color.white, 0.5f) : colour, new Hit(unit, Part.Body, 0));
-        Block(root, new Vector3(0, 1.4f, 3.26f), new Vector3(1.6f, 0.6f, 0.15f), unit.Control == "player" ? Color.yellow : Color.white);
+        float front = 3.25f, top = 2.2f;
+        if (Shapes.Of(unit.Blueprint) is { } shape)
+        {
+            var o = new GameObject("Battle Editor tank shape");
+            o.transform.SetParent(root.transform, false);
+            o.AddComponent<MeshFilter>().sharedMesh = shape;
+            o.AddComponent<MeshRenderer>();
+            Colour(o, body);
+            var bounds = shape.bounds;
+            var box = o.AddComponent<BoxCollider>();
+            box.center = bounds.center;
+            box.size = bounds.size;
+            pickable[o.Pointer] = new Hit(unit, Part.Body, 0);
+            front = Math.Max(1, bounds.max.z); top = bounds.max.y;
+            if (unit.Control == "player") Block(root, new Vector3(bounds.center.x, top + 0.1f, bounds.center.z), new Vector3(1.6f, 0.15f, 1.6f), Color.yellow);
+        }
+        else
+        {
+            Block(root, new Vector3(0, 1.1f, 0), new Vector3(3.2f, 2.2f, 6.5f), body, new Hit(unit, Part.Body, 0));
+            Block(root, new Vector3(0, 1.4f, 3.26f), new Vector3(1.6f, 0.6f, 0.15f), unit.Control == "player" ? Color.yellow : Color.white);
+        }
+        // From the middle to past the front, over the top.
         var arrow = picked ? Color.white : Color.Lerp(colour, Color.white, 0.6f);
-        Block(root, new Vector3(0, 2.45f, 3.5f), new Vector3(0.45f, 0.12f, 7f), arrow);
-        Block(root, new Vector3(-0.77f, 2.45f, 6.08f), new Vector3(0.45f, 0.12f, 2.4f), arrow, turn: 40);
-        Block(root, new Vector3(0.77f, 2.45f, 6.08f), new Vector3(0.45f, 0.12f, 2.4f), arrow, turn: -40);
-        Block(root, new Vector3(0, 2.45f, 7.6f), Vector3.one * 1.3f, picked ? Color.yellow : Color.white, new Hit(unit, Part.Tip, 0), PrimitiveType.Sphere);
+        float y = top + 0.25f;
+        Block(root, new Vector3(0, y, (front + 3.75f) / 2), new Vector3(0.45f, 0.12f, front + 3.75f), arrow);
+        Block(root, new Vector3(-0.77f, y, front + 2.83f), new Vector3(0.45f, 0.12f, 2.4f), arrow, turn: 40);
+        Block(root, new Vector3(0.77f, y, front + 2.83f), new Vector3(0.45f, 0.12f, 2.4f), arrow, turn: -40);
+        Block(root, new Vector3(0, y, front + 4.35f), Vector3.one * 1.3f, picked ? Color.yellow : Color.white, new Hit(unit, Part.Tip, 0), PrimitiveType.Sphere);
         root.transform.SetPositionAndRotation(Files.Vector(unit.Position), Quaternion.Euler(0, unit.Yaw, 0));
         return root;
     }
