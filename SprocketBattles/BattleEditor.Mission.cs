@@ -387,14 +387,14 @@ public sealed partial class BattleEditor
                     TextButton(new Rect(x + c, y, w - c, Row - 3), $"rule{i}", a.Text, a.Do == "message" ? "(click to type the message)" : "(click to type a line under the banner)", v => a.Text = v);
                     break;
                 case "artillery":
-                    Button(Next2(90), ZoneName(a.Zone), () => a.Zone = Cycle(zones, a.Zone));
+                    Button(Next2(90), ZoneName(r.ActionZone(m)?.Id), () => a.Zone = Cycle(zones, r.ActionZone(m)?.Id));
                     Button(Next2(26), "-", () => a.Shells = Math.Max(1, a.Shells - 4)); GUI.Label(Next2(64), $"{a.Shells} shells"); Button(Next2(26), "+", () => a.Shells += 4);
                     Button(Next2(66), $"{Mission.Calibre(a.Power)} mm", () => a.Power = Mission.PowerOf(Mission.Calibres.FirstOrDefault(k => k > Mission.Calibre(a.Power), Mission.Calibres[0])));
                     Button(Next2(26), "-", () => a.Seconds = Math.Max(1, a.Seconds - 5)); GUI.Label(Next2(40), $"{a.Seconds:0} s"); Button(Next2(26), "+", () => a.Seconds += 5);
                     break;
                 case "reserves": Team(v => a.Team = v, a.Team); break;
-                case "teamTo": Team(v => a.Team = v, a.Team); Button(Next2(110), ZoneName(a.Zone), () => a.Zone = Cycle(zones, a.Zone)); break;
-                case "unitTo": Button(Next2(80), a.Unit ?? "pick tank", () => a.Unit = Cycle(units, a.Unit)); Button(Next2(110), ZoneName(a.Zone), () => a.Zone = Cycle(zones, a.Zone)); break;
+                case "teamTo": Team(v => a.Team = v, a.Team); Button(Next2(110), ZoneName(r.ActionZone(m)?.Id), () => a.Zone = Cycle(zones, r.ActionZone(m)?.Id)); break;
+                case "unitTo": Button(Next2(80), a.Unit ?? "pick tank", () => a.Unit = Cycle(units, a.Unit)); Button(Next2(110), ZoneName(r.ActionZone(m)?.Id), () => a.Zone = Cycle(zones, r.ActionZone(m)?.Id)); break;
             }
             y += Row + 6;
         }

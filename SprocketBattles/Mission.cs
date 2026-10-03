@@ -104,7 +104,7 @@ internal static class Mission
         if (Time.time < nextCheck || Banner != null) return;
         nextCheck = Time.time + 0.25f;
         foreach (var rule in file.Mission?.Rules ?? new())
-            if (!done.Contains(rule) && Holds(rule)) { done.Add(rule); Guard.Run("mission rule", () => Do(rule.Then)); }
+            if (!done.Contains(rule) && Holds(rule)) { done.Add(rule); Guard.Run("mission rule", () => Do(rule)); }
     }
 
     // ---------- conditions ----------
@@ -139,15 +139,18 @@ internal static class Mission
 
     // ---------- actions ----------
 
-    static void Do(RuleAction a)
+    static void Do(Rule rule)
     {
+        var a = rule.Then;
+        var zone = rule.ActionZone(file!.Mission!);
+        string where = zone != null ? Name(zone) : "no zone (the mission has none)";
         Trace.Write("mission: " + a.Do switch
         {
             "message" or "victory" or "defeat" => $"{a.Do} \"{a.Text}\"",
-            "artillery" => $"artillery, {a.Shells} {Calibre(a.Power)} mm shells on {a.Zone} over {a.Seconds:0} s",
+            "artillery" => $"artillery, {a.Shells} {Calibre(a.Power)} mm shells on {where} over {a.Seconds:0} s",
             "reserves" => $"team {a.Team + 1}'s reserves",
-            "teamTo" => $"team {a.Team + 1} to {a.Zone}",
-            "unitTo" => $"{a.Unit} to {a.Zone}",
+            "teamTo" => $"team {a.Team + 1} to {where}",
+            "unitTo" => $"{a.Unit ?? "no tank picked"} to {where}",
             _ => a.Do,
         });
         switch (a.Do)
@@ -160,7 +163,7 @@ internal static class Mission
                 Time.timeScale = 0;
                 break;
             case "artillery":
-                if (Zone(a.Zone) is not { } z) break;
+                if (zone is not { } z) break;
                 var b = new Barrage { Centre = Files.Vector(z.Center), Radius = z.Radius, Power = a.Power };
                 for (int i = 0; i < Math.Max(1, a.Shells); i++) b.At.Add(Now + 1.5f + UnityEngine.Random.value * Math.Max(0.1f, a.Seconds));
                 b.At.Sort();
@@ -172,12 +175,12 @@ internal static class Mission
                     if (Tank(unit.Id) is { } tank) { Arrive(tank, unit); reserve.Remove(unit.Id); }
                 break;
             case "teamTo":
-                if (Zone(a.Zone) is not { } tz) break;
+                if (zone is not { } tz) break;
                 var team = Team(a.Team).Where(t => Alive(t.Id, t.Tank)).Select(t => t.Tank!).ToList();
                 for (int i = 0; i < team.Count; i++) SendInto(team[i], tz, i, team.Count);
                 break;
             case "unitTo":
-                if (Zone(a.Zone) is { } uz && a.Unit != null && Tank(a.Unit) is { } u && Alive(a.Unit, u)) SendInto(u, uz, 0, 1);
+                if (zone is { } uz && a.Unit != null && Tank(a.Unit) is { } u && Alive(a.Unit, u)) SendInto(u, uz, 0, 1);
                 break;
         }
     }

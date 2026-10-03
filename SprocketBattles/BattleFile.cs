@@ -178,6 +178,11 @@ public sealed class Rule
     public string? Zone { get; set; }             // teamEnters, unitEnters, holds
     public int Count { get; set; } = 1;           // losses: how many lost
     public RuleAction Then { get; set; } = new();
+
+    /// The zone its action goes to: the one picked for it, else the zone its condition watches, else the first zone.
+    /// An action left on "pick zone" used to do nothing at all.
+    public Zone? ActionZone(MissionData mission) =>
+        mission.Zones.FirstOrDefault(z => z.Id == Then.Zone) ?? mission.Zones.FirstOrDefault(z => z.Id == Zone) ?? mission.Zones.FirstOrDefault();
 }
 
 public sealed class RuleAction

@@ -10,7 +10,7 @@ namespace SprocketBattles;
 [BepInPlugin("local.sprocket.battles", "Battle Editor", Version)]
 public sealed class Plugin : BasePlugin
 {
-    const string Version = "0.15.1";
+    const string Version = "0.15.2";
 
     internal static ManualLogSource ModLog = null!;
 

@@ -71,6 +71,17 @@ static class BattleTests
         Check(BattleFile.FromJson(json).Units[0].AtSpawn && !BattleFile.FromJson(json).Units[1].AtSpawn, "at-spawn reads back");
         Check(json.Split("atSpawn").Length == 2, "at-spawn written only where set");
 
-        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal, at-spawn");
+        // An action left on "pick zone" goes to the zone its rule watches, else the first; one picked stays picked.
+        var zoned = new MissionData();
+        zoned.Zones.Add(new Zone { Id = "z1" });
+        zoned.Zones.Add(new Zone { Id = "z2" });
+        var enters = new Rule { When = "unitEnters", Unit = "u1", Zone = "z2", Then = new RuleAction { Do = "artillery" } };
+        Check(enters.ActionZone(zoned)?.Id == "z2", "artillery with no zone picked falls on the zone entered");
+        Check(new Rule { When = "time", Then = new RuleAction { Do = "artillery" } }.ActionZone(zoned)?.Id == "z1", "no zone anywhere: the first");
+        enters.Then.Zone = "z1";
+        Check(enters.ActionZone(zoned)?.Id == "z1", "a picked zone is kept");
+        Check(new Rule().ActionZone(new MissionData()) == null, "no zones: none");
+
+        Console.WriteLine("BATTLE_TESTS_OK: files read back, ids unique, spawn order by design, menu settings, removal, at-spawn, action zones");
     }
 }
