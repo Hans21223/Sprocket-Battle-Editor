@@ -343,8 +343,7 @@ internal static partial class MainMenu
     }
 
     static void ShowMap((string Map, string Splash, string ScenarioSplash, int Spawns) map) =>
-        Show("map " + map.Map, map.Map, $"A new custom battle on {map.Map}: up to {map.Spawns} tanks a side. Place them, then add a mission and a cinematic." +
-             (HiddenMaps.Contains(map.Map) ? " The game doesn't offer this map for custom battles: it may not work right." : ""),
+        Show("map " + map.Map, map.Map, $"A new custom battle on {map.Map}: up to {map.Spawns} tanks a side. Place them, then add a mission and a cinematic.",
              new[] { "Set by your mission" }, new[] { "Set by your mission" }, new[] { map.Map.ToUpperInvariant() },
              string.IsNullOrEmpty(map.Splash) ? map.ScenarioSplash : map.Splash);
 

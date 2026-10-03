@@ -305,7 +305,9 @@ internal static partial class MainMenu
             {
                 using var doc = JsonDocument.Parse(File.ReadAllText(f));
                 var r = doc.RootElement;
-                if ((!r.TryGetProperty("Deathmatch", out var d) || !d.GetBoolean()) && !HiddenMaps.Contains(Text("Identifier"))) continue;
+                // Only the game's own custom battle maps: Ambush has a Deathmatch setup in its scene, but the game's start
+                // throws on it (DeathmatchGameMode.Load: key '2' not found) and the battle never leaves the loading screen.
+                if (!r.TryGetProperty("Deathmatch", out var d) || !d.GetBoolean()) continue;
                 string Text(string key) => r.TryGetProperty(key, out var v) ? v.GetString() ?? "" : "";
                 int spawns = r.TryGetProperty("TeamSpawnsSupported", out var s) && s.GetArrayLength() > 0 ? s[0].GetInt32() : 0;
                 list.Add((r.GetProperty("Order").GetInt32(), Text("Identifier"), Text("CustomBattleSplashPath"), Text("ScenarioSplashPath"), spawns));
@@ -316,10 +318,6 @@ internal static partial class MainMenu
     }
 
     static List<(string Map, string Splash, string ScenarioSplash, int Spawns)>? maps;
-
-    /// Maps the game doesn't list for custom battles, though their scenes have a full Deathmatch setup (game mode, spawn
-    /// points, spawners): Ambush.
-    static readonly string[] HiddenMaps = { "Ambush" };
 
     static void Maps(Transform parent)
     {
@@ -356,6 +354,8 @@ internal static partial class MainMenu
                 if (!b.Units.Any(u => u.Team == t && !u.Reserve)) { Tell($"Team {t + 1} has no tanks on the map at the start: Edit it first (or Play from inside the editor)."); return; }
         }
         if (string.IsNullOrEmpty(b.Map)) { Tell("This battle has no map."); return; }
+        if (MapList().Count > 0 && !MapList().Any(m => string.Equals(m.Map, b.Map, StringComparison.OrdinalIgnoreCase)))
+        { Tell($"{b.Map} isn't one of the game's custom battle maps, so a battle can't start there."); return; }
         Menu.Launch(b.Map, b, play);
     }
 

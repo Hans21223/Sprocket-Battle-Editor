@@ -108,7 +108,7 @@ internal static class Menu
 
     static void Press(Launching l, CustomBattleCreation screen, BattleConfig config)
     {
-        // Set again just before: the screen's own map list may not have the map (Ambush), and may redo the weather.
+        // Set again just before: the screen's own modules may redo the map and the weather.
         config.MapName = l.Map;
         Weather(screen, config, l.File);
         var scenes = Enumerable.Range(0, UnityEngine.SceneManagement.SceneManager.sceneCount).Select(i => UnityEngine.SceneManagement.SceneManager.GetSceneAt(i).name);

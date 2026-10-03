@@ -96,8 +96,7 @@ partly:
 - Mission: mines, obstacles, reserves and most rules; the artillery's shell sizes.
 - The game's AT guns placed as units in a custom battle.
 - Force control's steering direction; the cinematic tank keys' aim at and shoot at.
-- Clouds / Fog from the menu, renaming and descriptions there, and **Ambush** (a map the game doesn't offer for custom
-  battles, though it has their setup).
+- Clouds / Fog from the menu, renaming and descriptions there.
 - The turret turn times (the turret's speed unit is inferred) and the drive corrections.
 
 ## Building
