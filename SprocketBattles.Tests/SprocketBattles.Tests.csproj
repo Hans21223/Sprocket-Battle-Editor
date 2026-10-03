@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The battle file format and the drivetrain maths, tested without the game: dotnet run -c Release -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\SprocketBattles\BattleFile.cs" Link="BattleFile.cs" />
+    <Compile Include="..\SprocketBattles\DriveSim.cs" Link="DriveSim.cs" />
+  </ItemGroup>
+</Project>
