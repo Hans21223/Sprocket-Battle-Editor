@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\SprocketMod.props" />
+  <PropertyGroup>
+    <AssemblyName>SprocketMaps</AssemblyName>
+    <Version>0.3.1</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The listed maps' pictures, next to the DLL (BepInEx\plugins\SprocketMaps). -->
+    <None Include="*.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -8,6 +8,11 @@ battle you can also command every tank on the field, or take over one tank's dri
 For **Sprocket 0.2.55.5** with the [Sprocket Mod Loader](https://github.com/Hans21223/Sprocket-Mod-Loader)
 (BepInEx 6 IL2CPP).
 
+**0.16.1 includes Battle Editor 0.16.1 and Map Framework 0.3.1 in one download.** Map Framework makes Ambush,
+The Crossroad, Silent Border, Sandbox and Sandbox (Low performance) available to Custom Battle and Battle Editor.
+It repairs Ambush's team setup and builds the missing custom-battle setups on the other maps. The Sandbox thumbnails
+are included beside the Map Framework DLL.
+
 > **Alpha.** Several parts haven't been tried in the game yet; see [Not tried in the game yet](#not-tried-in-the-game-yet).
 > Please report what works and what doesn't in [Issues](../../issues).
 
@@ -15,6 +20,10 @@ For **Sprocket 0.2.55.5** with the [Sprocket Mod Loader](https://github.com/Hans
 
 With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../../releases). By hand: copy the ZIP's
 `BepInEx` folder into the Sprocket folder.
+
+Choose **Sprocket-Battle-Editor-and-Map-Framework-0.16.1.zip**. It contains both plugins; the loader is installed
+separately. When updating, replace Battle Editor and remove any older extra copy of `SprocketMaps.dll` before copying
+the included `BepInEx\plugins\SprocketMaps` folder. Keep the two Sandbox PNGs beside that DLL.
 
 ## Starting
 
@@ -123,12 +132,20 @@ partly:
 
 ```text
 dotnet build SprocketBattles -c Release -p:GameDir="<your Sprocket folder>"
+dotnet build SprocketMaps -c Release -p:GameDir="<your Sprocket folder>"
 dotnet run --project SprocketBattles.Tests -c Release
+powershell -ExecutionPolicy Bypass -File tools\package-release.ps1
 ```
 
 The game folder needs the Sprocket Mod Loader, started once (it makes `BepInEx\interop`). The tests (the battle file
 format and the drivetrain maths) run without the game. New to Sprocket modding? See
 [Making Mods for Sprocket](docs/Making-Mods-for-Sprocket.pdf).
+
+The `SprocketMaps` project is included here so the source download contains both mods. Its starting source is Map
+Framework 0.3.1, revision `9d30b32`; its plugin behavior is unchanged in this bundled release. The packaging script
+uses the freshly built DLLs, checks their assembly versions, includes only the install files and writes a SHA256
+checksum in `artifacts`. Builds and offline battle, drivetrain and sharing tests pass; this bundled release has
+not been run in a new game session.
 
 ## License
 

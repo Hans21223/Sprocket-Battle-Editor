@@ -1,9 +1,17 @@
-Sprocket Battle Editor - make your own battles on Sprocket's custom battle maps, for Sprocket 0.2.55.5
+Sprocket Battle Editor 0.16.1 + Map Framework 0.3.1 - for Sprocket 0.2.55.5
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 INSTALL
 Needs the Sprocket Mod Loader (BepInEx 6 IL2CPP). Add the zip in Sprocket Mod Manager, or copy its BepInEx folder into
 the Sprocket folder.
+Both plugins are included. Map Framework and its two Sandbox PNGs live together in BepInEx\plugins\SprocketMaps.
+Remove any older extra copy of SprocketMaps.dll when updating, so only one copy is installed. Install the loader
+separately; this package contains no loader or game files.
+
+MAP FRAMEWORK
+Makes Ambush, The Crossroad, Silent Border, Sandbox and Sandbox (Low performance) available in Custom Battle and
+Battle Editor. Repairs Ambush's team setup and builds custom-battle setups on the other maps. Keep the Sandbox
+pictures beside SprocketMaps.dll. Map Framework's gameplay behavior is unchanged from 0.3.1.
 
 START
 - Main menu > Battle Editor (under Custom Battle): your battles on the game's Scenarios screen (the list scrolls).

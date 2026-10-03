@@ -2,5 +2,6 @@
   <Import Project="..\SprocketMod.props" />
   <PropertyGroup>
     <AssemblyName>SprocketBattles</AssemblyName>
+    <Version>0.16.1</Version>
   </PropertyGroup>
 </Project>
