@@ -5,11 +5,41 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\SprocketBattles\BattleFile.cs" Link="BattleFile.cs" />
+    <Compile Include="..\SprocketBattles\BattleFile.Validation.cs" Link="BattleFile.Validation.cs" />
+    <Compile Include="..\SprocketBattles\SavedFiles.cs" Link="SavedFiles.cs" />
+    <Compile Include="..\SprocketBattles\ReplayData.cs" Link="ReplayData.cs" />
+    <Compile Include="..\SprocketBattles\ReplayMedia.cs" Link="ReplayMedia.cs" />
+    <Compile Include="..\SprocketBattles\ReplayGeometry.cs" Link="ReplayGeometry.cs" />
+    <Compile Include="..\SprocketBattles\EditorResume.cs" Link="EditorResume.cs" />
+    <Compile Include="..\SprocketBattles\CameraEditing.cs" Link="CameraEditing.cs" />
     <Compile Include="..\SprocketBattles\DriveSim.cs" Link="DriveSim.cs" />
     <Compile Include="..\SprocketBattles\Sharing.cs" Link="Sharing.cs" />
     <Compile Include="..\SprocketBattles\Eras.cs" Link="Eras.cs" />
+    <Compile Include="..\SprocketBattles\Blueprints.cs" Link="Blueprints.cs" />
+    <Compile Include="..\SprocketBattles\SpawnClearance.cs" Link="SpawnClearance.cs" />
+    <Compile Include="..\SprocketBattles\SpawnTeamMapping.cs" Link="SpawnTeamMapping.cs" />
+    <Compile Include="..\SprocketBattles\RestartGate.cs" Link="RestartGate.cs" />
+    <Compile Include="..\SprocketBattles\MovementHoldPolicy.cs" Link="MovementHoldPolicy.cs" />
+    <Compile Include="..\SprocketBattles\FreeForAllRules.cs" Link="FreeForAllRules.cs" />
+    <Compile Include="..\SprocketBattles\RandomSpawnPlan.cs" Link="RandomSpawnPlan.cs" />
+    <Compile Include="..\SprocketBattles\SpawnSurface.cs" Link="SpawnSurface.cs" />
+    <Compile Include="..\SprocketBattles\GauntletRules.cs" Link="GauntletRules.cs" />
+    <Compile Include="..\SprocketBattles\DesignPoolRules.cs" Link="DesignPoolRules.cs" />
+    <Compile Include="..\SprocketMaps\MapOwnership.cs" Link="MapOwnership.cs" />
+    <Compile Include="..\SprocketMaps\CustomMapLifetime.cs" Link="CustomMapLifetime.cs" />
+    <Compile Include="..\SprocketMaps\CustomMapNavigation.cs" Link="CustomMapNavigation.cs" />
+    <Compile Include="..\SprocketMaps\SpawnFormation.cs" Link="SpawnFormation.cs" />
+    <Compile Include="..\SprocketMaps\CustomMapManifest.cs" Link="CustomMapManifest.cs" />
+    <Compile Include="..\SprocketMaps\NativeSceneLoadAbi.cs" Link="NativeSceneLoadAbi.cs" />
+    <Compile Include="..\SprocketMaps\CustomMapPathRules.cs" Link="CustomMapPathRules.cs" />
+    <Compile Include="..\SprocketMaps\MapImportSource.cs" Link="MapImportSource.cs" />
+    <Compile Include="..\SprocketMaps\MapImportConversion.cs" Link="MapImportConversion.cs" />
+    <Compile Include="..\SprocketMaps\MapImportDiscovery.cs" Link="MapImportDiscovery.cs" />
+    <EmbeddedResource Include="..\SprocketMaps\Import\SprocketAutoMapExport.cs.txt" LogicalName="SprocketMaps.AutoMapExporter" WithCulture="false" />
+    <PackageReference Include="SharpCompress" Version="0.50.4" />
   </ItemGroup>
 </Project>

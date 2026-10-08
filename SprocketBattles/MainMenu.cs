@@ -43,7 +43,7 @@ internal static partial class MainMenu
         battles = Files.SavedBattles();
         picked = Math.Clamp(picked, 0, Math.Max(0, battles.Count - 1));
         top = Math.Clamp(top, 0, Math.Max(0, battles.Count - Cards));
-        choosingMap = battles.Count == 0;
+        choosingMap = false;
         deleteArmed = false;
         if (OpenScreen()) return; // the game's own Scenarios screen
         Build();
@@ -57,7 +57,7 @@ internal static partial class MainMenu
 
     static void CloseMenu()
     {
-        actionsFor = -1; quickOpen = false; importOpen = false; typingKey = null; typingDone = null; // the dropdowns closed for next time
+        actionsFor = -1; quickOpen = false; gauntletOpen = false; importOpen = false; factionPicker = null; typingKey = null; typingDone = null;
         CloseScreen();
         if (canvas != null) { canvas.SetActive(false); UnityEngine.Object.Destroy(canvas); }
         canvas = null;
@@ -126,26 +126,36 @@ internal static partial class MainMenu
         var label = Text(pickerButton, "START BATTLE", 0, 0, 200, 60, 22, Dark, TextAlignmentOptions.Center, bold: true);
         label.rectTransform.anchorMin = Vector2.zero; label.rectTransform.anchorMax = Vector2.one; label.rectTransform.sizeDelta = Vector2.zero;
         label.rectTransform.anchoredPosition = Vector2.zero;
+        label.enableWordWrapping = false; label.fontSizeMin = 14; label.fontSizeMax = 22; label.enableAutoSizing = true;
         pickerStatus = Text(picker.transform, "", 0, 0, 900, 90, 20, Ink, TextAlignmentOptions.BottomRight);
         pickerStatus.rectTransform.anchorMin = pickerStatus.rectTransform.anchorMax = pickerStatus.rectTransform.pivot = Vector2.zero;
         pickerStatus.outlineWidth = 0.2f; pickerStatus.outlineColor = Color.black;
+        CreatePickerEditButton();
     }
 
     /// The button over the game's start (its screen corners: bottom left, top right), the status line over it.
     internal static void PlacePicker(Vector2 low, Vector2 high, string status, bool wrong)
     {
         if (pickerButton == null || pickerStatus == null) return;
-        pickerButton.anchoredPosition = low;
-        pickerButton.sizeDelta = high - low;
+        float width = Math.Max(220, high.x - low.x), height = Math.Max(38, high.y - low.y);
+        var left = new Vector2(high.x - width, low.y);
+        pickerButton.anchoredPosition = left;
+        pickerButton.sizeDelta = new Vector2(width, height);
         pickerStatus.rectTransform.anchoredPosition = new Vector2(high.x - 900, high.y + 8);
         pickerStatus.text = status;
         pickerStatus.color = wrong ? new Color(1f, 0.55f, 0.4f) : Ink;
+        if (pickerEditButton != null)
+        {
+            pickerEditButton.anchoredPosition = new Vector2(left.x, high.y + 110);
+            pickerEditButton.sizeDelta = new Vector2(width, 44);
+        }
     }
 
     internal static void HidePicker()
     {
         if (picker != null) UnityEngine.Object.Destroy(picker);
         picker = null; pickerButton = null; pickerStatus = null;
+        pickerEditButton = null; pickerEditClick = null;
     }
 
     /// A message on the menu (opened again if it was closed: a battle that couldn't start).
@@ -160,12 +170,15 @@ internal static partial class MainMenu
     /// Every frame: Esc goes back, the wheel scrolls the battles.
     internal static void Update()
     {
+        FinishClosingScreen();
         if (!IsOpen || ScreenUpdate()) return;
-        if (rebuild) { rebuild = false; Build(); }
+        if (rebuild && FallbackRebuildReady()) { rebuild = false; Build(); }
         if (Keyboard.current is { } keys && keys.escapeKey.wasPressedThisFrame)
         {
-            if (choosingMap && battles.Count > 0) { choosingMap = false; Build(); }
-            else Close();
+            if (typingKey != null) { StopTyping(); Build(); }
+            else if (factionPicker != null) { factionPicker = null; Build(); }
+            else if (choosingMap) { choosingMap = false; Build(); }
+            else if (renamedFrame != Time.frameCount) Close();
             return;
         }
         if (Mouse.current is { } mouse && listArea != null && !choosingMap && mouse.scroll.ReadValue().y is var wheel && wheel != 0
@@ -180,7 +193,20 @@ internal static partial class MainMenu
 
     static void Build()
     {
+        deferFallbackRebuild = false; fallbackReleasedAt = -1; rebuild = false;
+        if (fallbackSettingsScroll != null) fallbackScrollPosition =
+            fallbackSettingsScroll.content.rect.height > fallbackSettingsScroll.viewport.rect.height + 1
+                ? fallbackSettingsScroll.verticalNormalizedPosition : 1;
+        rebuildingFallback = true;
+        try { BuildFallback(); }
+        finally { rebuildingFallback = false; }
+    }
+
+    static void BuildFallback()
+    {
+        fallbackUiGeneration++;
         if (canvas != null) { canvas.SetActive(false); UnityEngine.Object.Destroy(canvas); }
+        fallbackSettingsScroll = null; keepFallbackScroll.Clear();
         keep.Clear(); keepText.Clear();
         canvas = new GameObject("Battle Editor menu", new Il2CppReferenceArray<Il2CppSystem.Type>(new[] { Il2CppType.Of<RectTransform>() }));
         var c = canvas.AddComponent<Canvas>();
@@ -206,21 +232,30 @@ internal static partial class MainMenu
         Text(root, "MISSIONS  ·  CINEMATICS  ·  COMMAND", 64, 78, 900, 30, 18, Dim, TextAlignmentOptions.Left).characterSpacing = 8;
 
         // Left: the saved battles.
-        Text(root, $"YOUR BATTLES  ({battles.Count})", 60, 146, 420, 34, 22, Ink, TextAlignmentOptions.Left, bold: true).characterSpacing = 4;
-        Btn(root, "+  NEW BATTLE", 470, 142, 230, 42, () => { choosingMap = true; newName = ""; Build(); }, primary: choosingMap);
-        listArea = Node("Battles", root, 60, 196, 640, Cards * 104);
-        for (int i = top; i < Math.Min(battles.Count, top + Cards); i++) BattleCard(listArea, i, (i - top) * 104);
-        if (battles.Count == 0) Text(listArea, "No battles yet.\nPick NEW BATTLE, choose a map, and place your tanks.", 20, 20, 600, 120, 20, Dim, TextAlignmentOptions.TopLeft);
-        if (battles.Count > Cards) Text(root, $"{top + 1}-{Math.Min(battles.Count, top + Cards)} of {battles.Count}   (mouse wheel)", 60, 196 + Cards * 104 + 4, 640, 26, 16, Dim, TextAlignmentOptions.Left);
+        Btn(root, "Editor", 60, 140, 310, 42, () => SelectSection(MenuSection.Editor), primary: menuSection == MenuSection.Editor);
+        Btn(root, "Playing", 390, 140, 310, 42, () => SelectSection(MenuSection.Playing), primary: menuSection == MenuSection.Playing);
+        Text(root, $"YOUR BATTLES  ({battles.Count})", 60, 192, 310, 34, 22, Ink, TextAlignmentOptions.Left, bold: true).characterSpacing = 4;
+        if (menuSection == MenuSection.Editor)
+            Btn(root, "+  NEW BATTLE", 470, 188, 230, 42, () => { choosingMap = true; newName = ""; Build(); }, primary: choosingMap);
+        else
+        {
+            Btn(root, "Quick battle", 390, 188, 150, 42, () => ToggleFallbackMode(false), primary: quickOpen, size: 15);
+            Btn(root, "Gauntlet", 550, 188, 150, 42, () => ToggleFallbackMode(true), primary: gauntletOpen, size: 15);
+        }
+        listArea = Node("Battles", root, 60, 238, 640, Cards * 100);
+        for (int i = top; i < Math.Min(battles.Count, top + Cards); i++) BattleCard(listArea, i, (i - top) * 100);
+        if (battles.Count == 0) Text(listArea, "No battles yet.\nOpen Editor, choose NEW BATTLE, and place your tanks.", 20, 20, 600, 120, 20, Dim, TextAlignmentOptions.TopLeft);
+        if (battles.Count > Cards) Text(root, $"{top + 1}-{Math.Min(battles.Count, top + Cards)} of {battles.Count}   (mouse wheel)", 60, 238 + Cards * 100 + 4, 640, 26, 16, Dim, TextAlignmentOptions.Left);
 
         // Right: the battle picked, or the maps for a new one.
         var right = Node("Picked", root, 760, 146, 1100, 860);
         if (choosingMap) Maps(right);
+        else if (menuSection == MenuSection.Playing && (quickOpen || gauntletOpen)) FallbackPlaying(right);
         else if (picked < battles.Count) Details(right, battles[picked]);
 
         // Bottom: back, and what the keys do in a battle.
         Btn(root, "BACK", 60, 1006, 200, 48, Close);
-        Text(root, "In a battle:  F9 editor (Tanks · Mission · Cinematic)   F10 command view (orders, force control)   Esc closes this menu",
+        Text(root, "Edit battle opens the editor. In a battle: F10 opens commands and force control. Esc closes this menu.",
              300, 1016, 1560, 30, 17, Dim, TextAlignmentOptions.Right);
         if (Time.unscaledTime < noteUntil && note.Length > 0)
         {
@@ -236,7 +271,7 @@ internal static partial class MainMenu
         var card = Node("Battle card", parent, 0, y, 640, 96);
         var image = card.gameObject.AddComponent<Image>();
         image.color = on ? CardPicked : Card;
-        Click(card.gameObject, image, () => { picked = index; deleteArmed = false; choosingMap = false; Build(); });
+        Click(card.gameObject, image, () => { StopTyping(); picked = index; deleteArmed = false; choosingMap = false; quickOpen = false; gauntletOpen = false; factionPicker = null; Build(); });
         if (on) { var o = card.gameObject.AddComponent<Outline>(); o.effectColor = Amber; o.effectDistance = new Vector2(2, -2); }
         int blue = b.Units.Count(u => u.Team == 0), red = b.Units.Count(u => u.Team == 1);
         // A stripe down its left side: the teams' share of the tanks.
@@ -244,7 +279,8 @@ internal static partial class MainMenu
         Fill(card, 0, 0, 8, 96 * share, Blue);
         Fill(card, 0, 96 * share, 8, 96 * (1 - share), Red);
         Text(card, b.Name, 24, 10, 420, 34, 25, on ? Amber : Ink, TextAlignmentOptions.Left, bold: true);
-        Text(card, $"{b.Map}   ·   {blue} vs {red} tanks{(b.Mission?.Rules.Count > 0 ? $"   ·   {b.Mission.Rules.Count} rules" : "")}{(b.Cinema?.Cameras.Count > 0 ? "   ·   cinematic" : "")}",
+        string lineup = b.FreeForAll ? $"Free-for-All · {b.Units.Count} tanks" : $"{blue} vs {red} tanks";
+        Text(card, $"{b.Map}   ·   {lineup}{(b.Mission?.Rules.Count > 0 ? $"   ·   {b.Mission.Rules.Count} rules" : "")}{(b.Cinema?.Cameras.Count > 0 ? "   ·   cinematic" : "")}",
              24, 50, 600, 28, 17, Dim, TextAlignmentOptions.Left);
         Text(card, File.GetLastWriteTime(path).ToString("d MMM yyyy"), 440, 14, 180, 26, 15, Dim, TextAlignmentOptions.Right);
     }
@@ -259,7 +295,8 @@ internal static partial class MainMenu
         if (Splash(b.Map) is { } sprite) { shot.sprite = sprite; shot.color = Color.white; shot.preserveAspect = false; }
         Fill(frame, 0, 330, 1100, 140, new Color(0, 0, 0, 0.62f));
         Fill(frame, 0, 466, 1100, 4, Amber);
-        Text(frame, b.Name.ToUpperInvariant(), 28, 346, 1040, 56, 44, Ink, TextAlignmentOptions.Left, bold: true).characterSpacing = 3;
+        if (menuSection == MenuSection.Editor) TextInput(frame, b.Name, 28, 346, 1040, 56, v => Rename(path, b, v));
+        else Text(frame, b.Name.ToUpperInvariant(), 28, 346, 1040, 56, 44, Ink, TextAlignmentOptions.Left, bold: true).characterSpacing = 3;
         Text(frame, $"MAP  {b.Map.ToUpperInvariant()}", 30, 408, 1040, 34, 20, Amber, TextAlignmentOptions.Left).characterSpacing = 6;
 
         // What's in it.
@@ -274,8 +311,8 @@ internal static partial class MainMenu
             Text(parent, text, x + 14, 496, w - 16, 30, 18, Ink, TextAlignmentOptions.Left);
             x += w + 10;
         }
-        Chip($"BLUE {blue}", Blue);
-        Chip($"RED {red}", Red);
+        if (b.FreeForAll) Chip($"FREE-FOR-ALL · {b.Units.Count} TANKS", Amber);
+        else { Chip($"BLUE {blue}", Blue); Chip($"RED {red}", Red); }
         if (reserves > 0) Chip($"RESERVES {reserves}", Dim);
         if (m != null && m.Rules.Count > 0) Chip($"RULES {m.Rules.Count}", Amber);
         if (m != null && m.Mines.Count > 0) Chip($"MINES {m.Mines.Count}", new Color(0.75f, 0.3f, 0.2f));
@@ -284,16 +321,22 @@ internal static partial class MainMenu
 
         // The mission's rules, as sentences.
         var lines = (m?.Rules ?? new()).Take(5).Select(r => "•  " + Sentence(r, m!)).ToList();
-        if (lines.Count == 0) lines.Add("No mission rules: the battle is fought to the last tank.");
+        if (lines.Count == 0) lines.Add(b.FreeForAll ? "Every tank is an opponent. The last mobile tank wins." : "Defeat the opposing team.");
         Text(parent, string.Join("\n", lines), 0, 548, 1100, 150, 18, Dim, TextAlignmentOptions.TopLeft);
-
-        // Its name, and what to do with it.
-        Text(parent, "NAME", 0, 712, 120, 40, 18, Dim, TextAlignmentOptions.Left).characterSpacing = 4;
-        TextInput(parent, b.Name, 90, 708, 600, 44, v => Rename(path, b, v));
+        Text(parent, menuSection == MenuSection.Editor
+            ? "Set player tank limits in Edit battle → Mission."
+            : "Choose and edit your tanks on this battle's map, or play with the author's tanks.",
+            0, 712, 1100, 44, 22, Ink, TextAlignmentOptions.Left);
         float bx = 0;
         void ActionButton(string text, Action act, bool primary = false, float w = 260) { Btn(parent, text, bx, 776, w, 64, act, primary, 24); bx += w + 20; }
-        ActionButton("PLAY", () => Start(b, play: true), primary: true);
-        ActionButton("EDIT", () => Start(b, play: false));
+        if (menuSection == MenuSection.Playing)
+        {
+            ActionButton("CHOOSE TANKS & PLAY", () => ChooseTanksAndPlay(b), primary: true, w: 500);
+            ActionButton("PLAY BATTLE TANKS", () => PlayAuthoredTanks(b), w: 500);
+            return;
+        }
+        if (b.Locked) { Text(parent, "Shared locked by its maker: play it from Playing.", 0, 776, 1100, 64, 24, Dim, TextAlignmentOptions.Left); return; }
+        ActionButton("EDIT BATTLE", () => Start(b, play: false), primary: true);
         ActionButton("DUPLICATE", () => Duplicate(b), w: 250);
         ActionButton(deleteArmed ? "SURE? DELETE" : "DELETE", () =>
         {
@@ -349,6 +392,12 @@ internal static partial class MainMenu
 
     /// The game's custom battle maps (its scenario configs that are deathmatches), in its order, with their pictures
     /// (custom battle and scenario) and how many tanks a side they take.
+    internal static int PlayerSpawnCapacity(string map) => MapList().FirstOrDefault(m => m.Map == map).Spawns;
+    internal static int EnemySpawnCapacity(string map)
+    { _ = MapList(); return enemySpawnCapacities.GetValueOrDefault(map); }
+    internal static List<(string Path, string Name)> GauntletDesigns(GauntletSettings settings) =>
+        RandomDesigns(Math.Clamp(Array.IndexOf(QuickPools, settings.Pool), 0, QuickPools.Length - 1), null, settings.EnemyFaction);
+
     static List<(string Map, string Splash, string ScenarioSplash, int Spawns)> MapList()
     {
         if (maps != null) return maps;
@@ -361,10 +410,13 @@ internal static partial class MainMenu
             var defined = Sprocket.UI.ScenarioLoader.GetScenarioDefinitions(System.IO.Path.Combine(Application.streamingAssetsPath, "Scenarios", "Configs"));
             for (int i = 0; i < defined.Length; i++)
                 if (defined[i]?.Config is { Deathmatch: true } c)
+                {
                     list.Add((c.Order, c.Identifier, c.CustomBattleSplashPath ?? "", c.ScenarioSplashPath ?? "",
                               c.TeamSpawnsSupported is { Length: > 0 } s ? s[0] : 0));
+                    enemySpawnCapacities[c.Identifier] = c.TeamSpawnsSupported is { Length: > 1 } e ? e[1] : 0;
+                }
         }
-        catch (Exception ex) { Trace.Write($"menu: the game's map list couldn't be read ({ex.Message}); reading its files"); list.Clear(); }
+        catch (Exception ex) { Trace.Write($"menu: the game's map list couldn't be read ({ex.Message}); reading its files"); list.Clear(); enemySpawnCapacities.Clear(); }
         if (list.Count == 0)
             try
             {
@@ -377,6 +429,7 @@ internal static partial class MainMenu
                     string Text(string key) => r.TryGetProperty(key, out var v) ? v.GetString() ?? "" : "";
                     int spawns = r.TryGetProperty("TeamSpawnsSupported", out var s) && s.GetArrayLength() > 0 ? s[0].GetInt32() : 0;
                     list.Add((r.GetProperty("Order").GetInt32(), Text("Identifier"), Text("CustomBattleSplashPath"), Text("ScenarioSplashPath"), spawns));
+                    enemySpawnCapacities[Text("Identifier")] = s.ValueKind == JsonValueKind.Array && s.GetArrayLength() > 1 ? s[1].GetInt32() : 0;
                 }
             }
             catch (Exception ex) { Trace.Write($"menu: couldn't read the maps: {ex.Message}"); return new(); }
@@ -384,6 +437,7 @@ internal static partial class MainMenu
     }
 
     static List<(string Map, string Splash, string ScenarioSplash, int Spawns)>? maps;
+    static readonly Dictionary<string, int> enemySpawnCapacities = new(StringComparer.Ordinal);
 
     static void Maps(Transform parent)
     {
@@ -414,10 +468,12 @@ internal static partial class MainMenu
     static void Start(BattleFile b, bool play)
     {
         if (Menu.Busy) return; // already starting one
+        if (!play && b.Locked) { Tell($"{b.Name} was shared locked by its maker: it can be played, not edited."); return; }
         if (play)
         {
             for (int t = 0; t < 2; t++)
-                if (!b.Units.Any(u => u.Team == t && !u.Reserve)) { Tell($"Team {t + 1} has no tanks on the map at the start: Edit it first (or Play from inside the editor)."); return; }
+                if (!b.Units.Any(u => u.Team == t && !u.Reserve))
+                { Tell($"{(b.FreeForAll ? "Spawn group" : "Team")} {t + 1} has no tanks on the map at the start. Place a tank in each loading group before playing."); return; }
         }
         if (string.IsNullOrEmpty(b.Map)) { Tell("This battle has no map."); return; }
         if (MapList().Count > 0 && !MapList().Any(m => string.Equals(m.Map, b.Map, StringComparison.OrdinalIgnoreCase)))
@@ -437,7 +493,7 @@ internal static partial class MainMenu
         var copy = BattleFile.FromJson(b.ToJson());
         copy.Name = UniqueName(b.Name + " copy");
         Directory.CreateDirectory(Files.Battles);
-        File.WriteAllText(Files.BattlePath(copy.Name), copy.ToJson());
+        SavedFiles.Write(Files.BattlePath(copy.Name), copy.ToJson(), overwrite: false);
         picked = 0; top = 0;
         Open();
     }
@@ -447,13 +503,13 @@ internal static partial class MainMenu
     static List<string>? sharedZips;
 
     /// A battle written as one zip to send (its designs and decal pictures in it), its folder opened.
-    static void Share(BattleFile b)
+    static void Share(BattleFile b, bool locked)
     {
         try
         {
-            var zip = Sharing.Export(b, Files.Root, Files.Shared);
-            Trace.Write($"menu: shared '{b.Name}' as {zip} ({new FileInfo(zip).Length / 1024} KB)");
-            Tell($"Shared as \"{Path.GetFileName(zip)}\" in My Games\\Sprocket\\Battles\\Shared (opened): send that file.");
+            var zip = Sharing.Export(b, Files.Root, Files.Shared, locked);
+            Trace.Write($"menu: shared '{b.Name}'{(locked ? " locked" : "")} as {zip} ({new FileInfo(zip).Length / 1024} KB)");
+            Tell($"Shared{(locked ? " locked (others can play it, not edit it)" : "")} as \"{Path.GetFileName(zip)}\" in My Games\\Sprocket\\Battles\\Shared (opened): send that file.");
             OpenFolder(Files.Shared);
         }
         catch (Exception ex) { Trace.Write($"menu: sharing '{b.Name}' failed: {ex}"); Tell($"Couldn't share it: {ex.Message}"); }
@@ -487,7 +543,7 @@ internal static partial class MainMenu
         var to = Files.BattlePath(name);
         if (File.Exists(to)) { Tell($"There's already a battle named {name}."); return; }
         b.Name = name;
-        try { File.WriteAllText(to, b.ToJson()); File.Delete(path); }
+        try { SavedFiles.Write(to, b.ToJson(), overwrite: false); File.Delete(path); }
         catch (Exception ex) { Tell($"Couldn't rename it: {ex.Message}"); return; }
         picked = 0; top = 0;
         Open();

@@ -1,0 +1,21 @@
+Map Framework public distribution scope
+
+The MIT license covers this repository's Battle Editor and Map Framework code. SharpCompress is distributed
+under its included license. Public packages contain no third-party custom scene bundles, their capacity
+manifests, source models/textures, converter caches or private user maps.
+
+Local compatibility fixtures, preserved only in the user's workspace:
+
+- Demo City (Night): converted from Demo City By Versatile Studio (Mobile Friendly), by Versatile Studio.
+  Source listing: https://marketplace.unity.com/packages/3d/environments/urban/demo-city-by-versatile-studio-mobile-friendly-269772
+  The listing uses the Standard Unity Asset Store EULA: https://unity.com/legal/as-terms
+  The scenery is not relicensed as MIT and is excluded from public framework packages.
+- FNAF 2 Pizzeria: converted from user-supplied nested model/texture archives. No redistribution license or
+  reliable creator credit was supplied or verified, so the scenery is excluded from public packages.
+
+To use custom scenery, obtain sources under their original terms and place them in your own CustomMaps
+folder. Automatic import converts a private copy using the licensed matching Unity 6000.3.21f1 editor.
+The original sources remain unchanged. Ready-made compatible scene bundles can also be used locally.
+
+The public package's two Sandbox thumbnails are the existing native-map illustrations already distributed
+with this framework, not screenshots of these third-party fixtures. No Sprocket game binaries are included.

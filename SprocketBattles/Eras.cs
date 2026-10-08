@@ -10,7 +10,7 @@ namespace SprocketBattles;
 /// Nothing here touches Unity, so the tests run it.
 public static class Eras
 {
-    public sealed record Era(string Name, DateTime Start);
+    public sealed record Era(string Name, DateTime Start, int? CustomCost = null, int? MediumMass = null, int? HeavyMass = null);
 
     static readonly JsonDocumentOptions Lenient = new() { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
     static readonly Regex Created = new("\"creationDate\"\\s*:\\s*\"([0-9.]+)\"");
@@ -27,7 +27,14 @@ public static class Eras
                 using var doc = JsonDocument.Parse(File.ReadAllText(file), Lenient);
                 var r = doc.RootElement;
                 if (r.TryGetProperty("name", out var n) && r.TryGetProperty("start", out var s) && Date(s.GetString()) is { } start)
-                    eras.Add(new Era(n.GetString() ?? Path.GetFileNameWithoutExtension(file), start));
+                {
+                    int? cost = null;
+                    if (r.TryGetProperty("cost", out var c) && c.TryGetInt32(out int cv)) cost = cv;
+                    else if (r.TryGetProperty("eraCost", out var ec) && ec.TryGetInt32(out int ecv)) cost = ecv;
+                    int? mediumMass = r.TryGetProperty("mediumVehicleMass", out var mm) && mm.TryGetInt32(out int mv) ? mv : null;
+                    int? heavyMass = r.TryGetProperty("heavyVehicleMass", out var hm) && hm.TryGetInt32(out int hv) ? hv : null;
+                    eras.Add(new Era(n.GetString() ?? Path.GetFileNameWithoutExtension(file), start, cost, mediumMass, heavyMass));
+                }
             }
             catch (Exception) { }
         return eras.OrderBy(e => e.Start).ToList();

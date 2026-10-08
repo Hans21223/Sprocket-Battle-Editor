@@ -57,11 +57,17 @@ internal static class Cinema
     /// The camera now follows `follow` (or nothing): its keys are moved into the new frame, so each stays where it was
     /// seen (in the editor, against the tanks' markers).
     internal static void Refollow(CameraTrack track, string? follow, Anchor anchor)
+        => Refollow(track, follow, (id, time) => anchor(id));
+
+    internal static void Refollow(CameraTrack track, string? follow, Func<string, float, (Vector3 At, float Yaw)?> anchor)
     {
-        var world = track.Keys.Select(k => World(k, track.Follow, anchor)).ToList();
+        var world = track.Keys.Select(k => World(k, track.Follow, id => anchor(id, k.Time))).ToList();
         track.Follow = follow;
         for (int i = 0; i < track.Keys.Count; i++)
-            track.Keys[i] = Key(track.Keys[i].Time, world[i].Position, world[i].Rotation, world[i].Fov, track, anchor);
+        {
+            float time = track.Keys[i].Time;
+            track.Keys[i] = Key(time, world[i].Position, world[i].Rotation, world[i].Fov, track, id => anchor(id, time));
+        }
     }
 
     /// The key for a view: in the world, or around the followed tank.
@@ -145,7 +151,7 @@ internal static class Cinema
             p.Throttle = pose.Drive?.Throttle ?? 0; p.Steer = pose.Drive?.Steer ?? 0;
             p.Turret = pose.Turret ?? 0; p.Gun = pose.Gun ?? 0;
             p.AimAt = a?.AimPoint is { } point ? Files.Vector(point) : target != null ? target.Position + Vector3.up * 1.5f : null;
-            var shootAt = a?.ShootAt != null && target != null && (target.Flags & (VehicleFlags.Mobile | VehicleFlags.Armed)) != 0 ? target : null;
+            var shootAt = a?.ShootAt != null && target != null && !Battle.Out(target) ? target : null;
             if (shootAt?.Pointer != p.ShootAt?.Pointer) p.ReadySince.Clear(); // a new target: each gun waits for its aim again
             p.ShootAt = shootAt;
             // Drive to a point: the AI drives there (given once per key).

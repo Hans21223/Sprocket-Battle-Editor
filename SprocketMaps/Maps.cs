@@ -16,7 +16,7 @@ internal static class Maps
     /// `Description`: for a map the game doesn't list at all, which the framework lists itself, with its picture
     /// (`<Identifier>.png` next to the DLL).
     internal sealed record Map(string Identifier, ushort Spawns, string Why, string? Scene = null,
-        Vector2? Attackers = null, Vector2? Defenders = null, string? Description = null);
+        Vector2? Attackers = null, Vector2? Defenders = null, string? Description = null, string? DisplayName = null);
 
     internal static readonly Map[] Known =
     {
@@ -35,11 +35,66 @@ internal static class Maps
             "The test drive's flat ground: no hills, no cover, nothing in the way. Both sides start in its open north half, 700 m apart."),
     };
 
+    internal static IEnumerable<Map> All => Known.Concat(CustomMapBridge.ListedMaps);
+    internal static string? CustomLoadName(string? identifier) => CustomMapBridge.LoadName(identifier);
+
+    // Scene bundles supply scenery; CustomMapBridge starts them through an authentic native controller.
+    // Discovery never modifies an authored bundle or any built-in scene definition.
+    static readonly HashSet<string> unavailableBundles = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static string? UnavailableReason(string? identifier) => CustomMapBridge.FailureFor(identifier)
+        ?? (MapOwnership.Quarantined(identifier, unavailableBundles) && CustomLoadName(identifier) == null
+            ? $"Map '{identifier}' could not be loaded. Update its map file or choose another map."
+            : null);
+
+    internal static void LoadCustomBundles()
+    {
+        var dir = Path.GetDirectoryName(typeof(Plugin).Assembly.Location);
+        var searchPaths = new List<string>();
+        if (!string.IsNullOrEmpty(dir))
+        {
+            searchPaths.Add(Path.Combine(dir, "CustomMaps"));
+            searchPaths.Add(dir);
+        }
+        try
+        {
+            if (!string.IsNullOrEmpty(BepInEx.Paths.PluginPath))
+            {
+                searchPaths.Add(Path.Combine(BepInEx.Paths.PluginPath, "CustomMaps"));
+                searchPaths.Add(Path.Combine(BepInEx.Paths.PluginPath, "SprocketMaps", "CustomMaps"));
+            }
+        }
+        catch (Exception ex) { Plugin.ModLog.LogWarning($"Could not locate the plugin maps folder: {ex.Message}"); }
+
+        foreach (var customDir in searchPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (!Directory.Exists(customDir)) continue;
+                foreach (var file in Directory.EnumerateFiles(customDir))
+                {
+                    if (MapOwnership.BundleName(file) is not { } bundleName) continue;
+                    if (MapOwnership.IsNativeMap(bundleName))
+                    {
+                        Plugin.ModLog.LogWarning($"Ignored bundle '{file}': its name belongs to a built-in map. Native scene resolution is unchanged.");
+                        continue;
+                    }
+                    if (!unavailableBundles.Add(bundleName)) continue;
+                    try { CustomMapBridge.Register(file); }
+                    catch (Exception ex) { Plugin.ModLog.LogWarning($"Couldn't load custom map '{file}': {ex.Message}. The map file was left untouched."); }
+                }
+            }
+            catch (Exception ex) { Plugin.ModLog.LogWarning($"Could not inspect custom map folder '{customDir}': {ex.Message}"); }
+        }
+    }
+
     /// By its config's identifier ("TheCrossroad") or its scene's name ("The Crossroad"), whichever the game goes by.
-    internal static Map? Of(string? identifier) => Known.FirstOrDefault(m =>
+    internal static Map? Of(string? identifier) => All.FirstOrDefault(m =>
         string.Equals(m.Identifier, identifier, StringComparison.OrdinalIgnoreCase) || string.Equals(m.Scene, identifier, StringComparison.OrdinalIgnoreCase));
 
-    internal static Map? Built(string scene) => Known.FirstOrDefault(m => m.Scene != null && string.Equals(m.Scene, scene, StringComparison.OrdinalIgnoreCase));
+    internal static Map? Built(string scene) => MapOwnership.CanBuildNativeScene(scene)
+        ? Known.FirstOrDefault(m => m.Scene != null && string.Equals(m.Scene, scene, StringComparison.OrdinalIgnoreCase))
+        : null;
 }
 
 /// The game's map list (read from Scenarios\Configs at start and on reload): the framework's maps marked as custom
@@ -51,6 +106,15 @@ internal static class MapList
     static void Listed(ref Il2CppReferenceArray<MapInfo> __result)
     {
         if (__result == null) return;
+        var supported = new List<MapInfo>();
+        for (int i = 0; i < __result.Length; i++)
+        {
+            var entry = __result[i];
+            if (Maps.UnavailableReason(entry?.Config?.Identifier) is { } reason)
+                Plugin.ModLog.LogWarning(reason);
+            else supported.Add(entry!); // Preserve any null slots already supplied by the native list.
+        }
+        if (supported.Count != __result.Length) __result = new Il2CppReferenceArray<MapInfo>(supported.ToArray());
         var unknown = new List<string>();
         var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < __result.Length; i++)
@@ -67,7 +131,7 @@ internal static class MapList
         }
         if (unknown.Count > 0) Plugin.ModLog.LogInfo($"scenario-only maps the framework doesn't know: {string.Join(", ", unknown)}");
 
-        var added = Maps.Known.Where(m => m.Description != null && !listed.Contains(m.Identifier)).ToList();
+        var added = Maps.All.Where(m => m.Description != null && !listed.Contains(m.Identifier)).ToList();
         if (added.Count == 0) return;
         var all = new Il2CppReferenceArray<MapInfo>(__result.Length + added.Count);
         for (int i = 0; i < __result.Length; i++) all[i] = __result[i];
@@ -80,10 +144,14 @@ internal static class MapList
     static MapInfo Listing(Maps.Map map)
     {
         var splash = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location) ?? "", map.Identifier + ".png");
-        if (!File.Exists(splash)) { Plugin.ModLog.LogWarning($"{map.Identifier}: no picture at {splash}"); splash = ""; }
+        if (!File.Exists(splash))
+        {
+            var fallback = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location) ?? "", "Sandbox.png");
+            splash = File.Exists(fallback) ? fallback : "";
+        }
         var localization = new MapLocalization
         {
-            Identifier = map.Identifier, Name = map.Identifier, Description = map.Description,
+            Identifier = map.Identifier, Name = map.DisplayName ?? map.Identifier, Description = map.Description,
             Objectives = new Il2CppStringArray(0), FailConditions = new Il2CppStringArray(0), Tags = new Il2CppStringArray(0),
         };
         var config = new MapConfig

@@ -42,7 +42,13 @@ internal static class Travel
     {
         if (known != null) return known;
         try { known = JsonSerializer.Deserialize<Dictionary<string, Profile>>(System.IO.File.ReadAllText(File)); } catch (Exception) { }
-        return known = new Dictionary<string, Profile>(known ?? new(), StringComparer.OrdinalIgnoreCase);
+        return known = new Dictionary<string, Profile>((known ?? new()).Where(e => e.Value is { } p
+            && p.Distance is { Length: > 0 } && p.Distance.All(float.IsFinite) && p.Distance[0] == 0
+            && p.Distance.Zip(p.Distance.Skip(1), (a, b) => b >= a).All(ok => ok)
+            && float.IsFinite(p.Top) && p.Top > 0 && float.IsFinite(p.Correction) && p.Correction > 0
+            && float.IsFinite(p.Traverse) && float.IsFinite(p.TraverseAccel) && p.Drives >= 0)
+            .GroupBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Last().Value, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
     }
 
     static long StampOf(string path) { try { return System.IO.File.GetLastWriteTimeUtc(path).Ticks; } catch (Exception) { return 0; } }
@@ -73,7 +79,7 @@ internal static class Travel
 
     static void SaveAll()
     {
-        lock (working) try { System.IO.File.WriteAllText(File, JsonSerializer.Serialize(known)); } catch (Exception) { }
+        lock (working) try { SavedFiles.Write(File, JsonSerializer.Serialize(known)); } catch (Exception) { }
     }
 
     /// A spawned tank of a design: its drive worked out (in the background) unless already known, its turret read.

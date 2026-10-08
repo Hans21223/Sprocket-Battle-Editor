@@ -5,15 +5,16 @@ using Sprocket.Vehicles;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Sprocket.Vehicles.Spawning;
 using UnityEngine;
+using Sprocket.ArtificialIntelligence;
+using Sprocket.VehicleControl;
 
 namespace SprocketBattles;
 
 /// The battle side: the running custom battle's map and tanks, and playing an edited battle in it. Playing rewrites the
-/// custom battle's own teams to the battle file's tanks and restarts it (the game's Retry), then moves each tank to
-/// where it was placed once the game has spawned it. Nothing of the game's is hooked: hooks on its loading never ran,
-/// one on its spawning crashed it, and hooks on its win and loss (for a team left empty) most likely made Reset in the
-/// pause menu crash it; a battle with an empty team doesn't end anyway.
-internal static class Battle
+/// custom battle's own teams and native spawn locators to the battle file's tanks and poses, then restarts it
+/// (the game's Retry). Tanks are registered after spawning, without changing live physics transforms.
+/// Async loading/spawning methods with value-type arguments remain unhooked.
+internal static partial class Battle
 {
     /// The running battle, kept once found (searching every object each frame cost a lot with many tanks); looked
     /// for again at most once a second while there is none.
@@ -52,6 +53,8 @@ internal static class Battle
     /// Whether every tank the battle started with is in.
     internal static bool Spawned(DeathmatchGameMode mode)
     {
+        // VehicleSpawn records appear one design at a time; a ready first record doesn't finish native setup.
+        if (mode.gameState != DeathmatchGameMode.ModeState.Running) return false;
         var spawns = mode.vehicleSpawns;
         if (spawns == null || spawns.Count == 0) return false;
         for (int i = 0; i < spawns.Count; i++) if (spawns[i] == null || !spawns[i].Spawned) return false;
@@ -59,17 +62,69 @@ internal static class Battle
     }
 
     /// Restart the battle with the file's tanks: the custom battle's teams get them, one unit per design in the order the
-    /// file spawns them, and they're moved to their places once spawned. A reason it can't, or null.
+    /// file spawns them, using their authored positions before native physics setup. A reason it can't, or null.
     internal static string? Play(DeathmatchGameMode mode, BattleFile file)
     {
+        if (restart != null) return "The battle is already preparing to restart. Please wait.";
+        if (!Spawned(mode)) return "The map's tanks are still loading. Wait for setup to finish before playing.";
         var teams = mode.context?.SetupContext?.SetupConfig?.TryCast<BattleConfig>()?.Teams;
         if (teams == null) return "This battle isn't a custom battle, so it can't be restarted with these tanks.";
+        if (teams.Any(t => t == null)) return "The battle's team setup isn't ready yet.";
+        var previous = Enumerable.Range(0, teams.Length).Select(t => teams[t].Units).ToArray();
         if (Fill(teams, file) is { } error) return error;
         var spawns = mode.vehicleSpawns;
         if (spawns != null) for (int i = 0; i < spawns.Count; i++) if (spawns[i] != null) before.Add(spawns[i].Pointer);
-        Trace.Write($"play '{file.Name}' on {file.Map}: {toPlace!.Count} tanks, restarting");
-        mode.RetryAsyncVoid();
+        try { SpawnPlan.Apply(mode); }
+        catch (Exception ex)
+        {
+            Trace.Write($"play '{file.Name}': native spawn preparation failed: {ex}");
+            for (int t = 0; t < teams.Length; t++) teams[t].Units = previous[t];
+            toPlace = null; playing = null; before.Clear();
+            return $"Couldn't prepare native tank spawn positions: {ex.Message}";
+        }
+        // Retry releases the current tanks synchronously before its first await. Leave must restore the
+        // editor's renderer/input/camera references first, and Unity must flush destroyed markers this frame.
+        restart = new RestartRequest(mode, teams, previous, new RestartGate(Time.frameCount, Time.fixedTime), file.Name);
+        Trace.Write($"play '{file.Name}' on {file.Map}: {toPlace!.Count} tanks, restart queued at frame {Time.frameCount}");
         return null;
+    }
+
+    sealed record RestartRequest(DeathmatchGameMode Mode, Il2CppReferenceArray<TeamDefinition> Teams,
+        Il2CppSystem.Collections.Generic.Dictionary<UnitDefinition, UnitInstanceInfo>[] Previous,
+        RestartGate Gate, string Name);
+
+    static RestartRequest? restart;
+    internal static bool RestartQueued => restart != null;
+    internal static bool PreparedNativeRetry => toPlace != null || restart != null;
+
+    /// Called at the end of the frame, after native Update/LateUpdate and editor cleanup, before releasing tanks.
+    internal static void StepRestart(bool editorViewActive)
+    {
+        var request = restart;
+        if (request == null || !request.Gate.TryBegin(Time.frameCount, Time.fixedTime, editorViewActive, Time.timeScale <= 0)) return;
+        // Clear before native code: any callbacks/repeated button input must not launch the same retry twice.
+        restart = null;
+        try
+        {
+            if (request.Mode == null || !request.Mode.gameObject.scene.isLoaded)
+                throw new InvalidOperationException("The battle's map closed before the restart");
+            if (!Spawned(request.Mode))
+                throw new InvalidOperationException("The battle's native setup changed before the restart");
+            if (!SpawnPlan.ReadyFor(request.Mode) || toPlace == null || toPlace.Count == 0)
+                throw new InvalidOperationException("The prepared tank spawn positions are no longer available");
+            Trace.Write($"play '{request.Name}': native restart starting at frame {Time.frameCount}, physics time {Time.fixedTime:0.000}, editor closed");
+            request.Mode.RetryAsyncVoid();
+            Trace.Write($"play '{request.Name}': native restart call returned");
+        }
+        catch (Exception ex)
+        {
+            Trace.Write($"play '{request.Name}': native restart failed: {ex}");
+            for (int t = 0; t < request.Teams.Length; t++)
+                if (request.Teams[t] != null) request.Teams[t].Units = request.Previous[t];
+            StopOrders();
+            toPlace = null; playing = null; before.Clear();
+            BattleEditor.Tell($"Couldn't restart the battle: {ex.Message}. See SprocketBattles-trace.log.");
+        }
     }
 
     /// A battle about to start from the Custom Battle screen (the Battle Editor menu's Play): its teams are the file's.
@@ -85,17 +140,21 @@ internal static class Battle
     /// places as Pick tanks. Prepare (with the picks put in) takes over once they press Start battle. A reason, or null.
     internal static string? PreparePick(Il2CppReferenceArray<TeamDefinition> teams, BattleFile file)
     {
+        if (file.CheckData() is { } dataIssue) return dataIssue;
+        if (teams.Length == 0 || teams.Any(t => t == null)) return "The game's teams aren't ready yet.";
+        if (file.PickCapacity == 0) return "This battle has no player tank positions. Mark Team 1 tanks as player choices in the editor first.";
         foreach (var u in file.Units.Where(u => u.Team != 0))
             if (UnitFor(u.Blueprint) == null) return $"Couldn't read the design {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}.";
+        RestorePickTeam();
+        pickedTeam = (teams[0], teams[0].Budget, teams[0].maxUnits);
         for (int t = 0; t < teams.Length; t++)
         {
             teams[t].Units.Clear();
             if (t == 0) continue;
-            foreach (var group in file.SpawnGroups(t)) teams[t].Units.Add(UnitFor(group[0].Blueprint)!, new UnitInstanceInfo { Count = group.Count });
+            foreach (var group in file.SpawnGroups(t, Files.Absolute)) teams[t].Units.Add(UnitFor(group[0].Blueprint)!, new UnitInstanceInfo { Count = group.Count });
         }
-        pickedTeam = (teams[0].Budget, teams[0].maxUnits);
         teams[0].Budget = Budget(file.Limits?.Budget > 0 ? file.Limits.Budget : -1);
-        teams[0].maxUnits = file.Slots.Count;
+        teams[0].maxUnits = file.PickCapacity;
         return null;
     }
 
@@ -105,13 +164,36 @@ internal static class Battle
     {
         if (pickedTeam is not { } was) return;
         teams[0].Budget = Budget(-1);
-        teams[0].maxUnits = Math.Max(was.MaxUnits, 64);
+        teams[0].maxUnits = Math.Max(was.MaxUnits, teams[0].UnitCount);
         pickedTeam = null;
     }
 
-    static (Cost Budget, int MaxUnits)? pickedTeam;
+    /// Leaving the picker restores the normal Custom Battle budget and tank limit, even when its screen has closed.
+    internal static void RestorePickTeam()
+    {
+        if (pickedTeam is not { } was) return;
+        pickedTeam = null;
+        was.Team.Budget = was.Budget;
+        was.Team.maxUnits = was.MaxUnits;
+    }
+
+    static (TeamDefinition Team, Cost Budget, int MaxUnits)? pickedTeam;
 
     static Cost Budget(int amount) => new(new Il2CppStructArray<int>(new[] { amount }));
+
+    /// Restore a lineup after visiting the native vehicle designer, reading fresh prices from the saved designs.
+    internal static string? RestorePicks(TeamDefinition team, IReadOnlyList<string> blueprints)
+    {
+        var definitions = new List<(UnitDefinition Unit, int Count)>();
+        foreach (var group in blueprints.GroupBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            if (UnitFor(group.Key) is not { } unit) return $"Couldn't restore the selected design {Path.GetFileNameWithoutExtension(group.Key)}. Choose it again on this screen.";
+            definitions.Add((unit, group.Count()));
+        }
+        team.Units.Clear();
+        foreach (var entry in definitions) team.Units.Add(entry.Unit, new UnitInstanceInfo { Count = entry.Count });
+        return null;
+    }
 
     /// The tanks the player has picked on the screen (each as many times as its count): name, design file, cost.
     internal static List<(string Name, string Path, int Cost)> Picked(TeamDefinition team)
@@ -122,29 +204,55 @@ internal static class Battle
             var def = unit.Key;
             if (def == null) continue;
             int cost = def.Cost?.quantities is { Length: > 0 } q ? q[0] : 0;
-            for (int i = 0; i < Math.Max(1, unit.Value?.Count ?? 1); i++) picked.Add((def.Name, def.Path, cost));
+            for (int i = 0; i < Math.Max(0, unit.Value?.Count ?? 0); i++) picked.Add((def.Name, def.Path, cost));
         }
         return picked;
     }
 
     /// The custom battle's teams made the file's tanks, one unit per design in the order the file spawns them, and
     /// the tanks to place once spawned. A reason it can't, or null.
+    /// Why the battle can't be played as it is, or null. The game puts the player in one of Team 1's tanks on the map:
+    /// with none its setup fails and the screen stays black. A broken design (Blueprints) can crash the game.
+    internal static string? CannotPlay(BattleFile file)
+    {
+        if (file.CheckData(forPlay: true) is { } dataIssue) return dataIssue;
+        if (file.FreeForAll && file.Gauntlet != null) return "Choose either Free-for-All or Gauntlet for this battle.";
+        if (file.FreeForAllSpawns?.Check() is { } spacingIssue) return spacingIssue;
+        if (file.Gauntlet != null && !Gauntlet.IsCurrent(file)) return "This Gauntlet run has ended. Start a new one from Playing → Gauntlet.";
+        if (file.FreeForAll && !FreeForAll.Attached)
+            return "Free for all couldn't attach to this game build. Check SprocketBattles-trace.log.";
+        if (file.FreeForAll && (file.Units.Count < 2 || file.Units.Count > BattleFile.MaxFreeForAllTanks))
+            return $"Free for all needs between 2 and {BattleFile.MaxFreeForAllTanks} tanks (including reserves).";
+        if (file.FreeForAll && !file.Units.Any(u => u.Team == 1 && !u.Reserve))
+            return "Spawn group 2 needs a starting tank to load Free for all; each tank still fights alone.";
+        if (!file.Units.Any(u => u.Team == 0 && !u.Reserve)) return "Team 1 needs a tank on the map at the start: the game puts you in one of them.";
+        foreach (var path in file.Units.Select(u => u.Blueprint).Distinct(StringComparer.OrdinalIgnoreCase))
+            if (Files.BrokenOf(path) is { } why)
+                return $"{Path.GetFileNameWithoutExtension(path)} can't be used: {why}. Open it in the vehicle designer, fix its tracks and save it again.";
+        return null;
+    }
+
     static string? Fill(Il2CppReferenceArray<TeamDefinition> teams, BattleFile file)
     {
+        if (CannotPlay(file) is { } why) return why;
+        if (file.Units.Any(u => u.Team >= teams.Length)) return "A tank refers to a team that isn't in this battle.";
         // Every design read first: the teams only change once they all can be.
         foreach (var u in file.Units)
             if (UnitFor(u.Blueprint) == null) return $"Couldn't read the design {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}.";
         var order = new List<BattleUnit>();
+        var lineups = new Il2CppSystem.Collections.Generic.Dictionary<UnitDefinition, UnitInstanceInfo>[teams.Length];
         for (int t = 0; t < teams.Length; t++)
         {
-            var units = teams[t].Units;
-            units.Clear();
-            foreach (var group in file.SpawnGroups(t))
+            if (teams[t] == null) return $"Team {t + 1} isn't ready yet.";
+            var units = lineups[t] = new();
+            foreach (var group in file.SpawnGroups(t, Files.Absolute))
             {
                 units.Add(UnitFor(group[0].Blueprint)!, new UnitInstanceInfo { Count = group.Count });
                 order.AddRange(group);
             }
         }
+        // Replace dictionaries instead of clearing the originals so failed spawn planning can restore the lineup.
+        for (int t = 0; t < teams.Length; t++) teams[t].Units = lineups[t];
         StopOrders();
         Mission.Stop();
         before.Clear();
@@ -154,16 +262,19 @@ internal static class Battle
         return null;
     }
 
-    /// A battle about to start from the Custom Battle screen to be edited: a team with no tanks gets one of your designs
-    /// (the screen won't start without; the editor moves the battle's own tanks away anyway).
+    /// A battle about to start for editing uses one hidden placeholder per team, without retaining the native
+    /// screen's previous lineup. These are only loading vehicles; authored tanks are installed when Play is requested.
     internal static string? FillEmpty(Il2CppReferenceArray<TeamDefinition> teams)
     {
-        var designs = Files.Designs();
-        if (designs.Count == 0) return "No vehicle designs in My Games\\Sprocket\\Factions to start a battle with.";
-        var unit = UnitFor(designs[0].Path);
-        if (unit == null) return $"Couldn't read the design {designs[0].Name}.";
+        if (teams.Length == 0 || teams.Any(t => t == null)) return "The battle's team setup isn't ready yet.";
+        if (LoadingVehicle() is not { } loading)
+            return "No usable loading tank was found. Check the game files or fix a design's tracks in the vehicle designer.";
         for (int t = 0; t < teams.Length; t++)
-            if (teams[t] != null && teams[t].UnitCount == 0) teams[t].Units.Add(unit, new UnitInstanceInfo { Count = 1 });
+        {
+            teams[t].Units = new();
+            teams[t].Units.Add(loading.Unit, new UnitInstanceInfo { Count = 1 });
+        }
+        Trace.Write($"editor loading vehicle: {loading.Path}; track validation passed; one per team");
         StopOrders();
         Mission.Stop();
         toPlace = null;
@@ -171,70 +282,149 @@ internal static class Battle
         return null;
     }
 
+    /// Both editor launch paths use the same validated loading tank, preferring the game's shipped designs.
+    internal static (string Path, UnitDefinition Unit)? LoadingVehicle()
+    {
+        // These vehicles also go through native track teardown on Play. Never use an unchecked faction design:
+        // an old save with missing track segments can load far enough to open the editor, then crash on Retry.
+        var candidates = Files.GameDesigns().Where(d => !Files.IsATGun(d.Path)).Concat(Files.Designs())
+            .Select(d => d.Path).Distinct(StringComparer.OrdinalIgnoreCase);
+        UnitDefinition? unit = null;
+        var path = Blueprints.ChooseLoadingVehicle(candidates, Files.BrokenOf, p => (unit = UnitFor(p)) != null,
+            (p, why) => Trace.Write($"editor loading vehicle skipped: {p}: {why}"));
+        return path == null || unit == null ? null : (path, unit);
+    }
+
     /// The battle file being played (its tanks placed, its mission and cinematic running), if any.
     internal static BattleFile? Playing => playing;
     static BattleFile? playing;
+    static UnityEngine.SceneManagement.Scene? runningScene;
+
+    internal static void OwnScene(DeathmatchGameMode on) => runningScene = on.gameObject.scene;
+
+    internal static void StepSceneLifetime()
+    {
+        if (runningScene is { } owned && (!owned.IsValid() || !owned.isLoaded)) EndScene();
+    }
+
+    internal static void EndScene()
+    {
+        StopOrders();
+        Mission.Stop();
+        Puppet.ReleaseAll();
+        Puppet.Unlock();
+        toPlace = null; playing = null; before.Clear();
+        mode = null; lookedAt = -10;
+        slowBefore.Clear();
+    }
 
     /// A custom battle unit for a design, made the way the Custom Battle screen makes its own (name, cost, icon): the
     /// screen prices every unit, and one without a cost broke it (an error every frame, and a crash going back to the
     /// menu). Null if the game can't read the design.
     internal static UnitDefinition? UnitFor(string blueprint)
     {
-        var path = Files.Absolute(blueprint);
-        if (Units.TryGetValue(path, out var known)) return known;
         try
         {
+            var path = Files.Absolute(blueprint);
+            var info = new FileInfo(path);
+            if (!info.Exists) { Units.Remove(path); Trace.Write($"couldn't find the design {path}"); return null; }
+            long stamp = info.LastWriteTimeUtc.Ticks, size = info.Length;
+            if (Units.TryGetValue(path, out var known) && known.Stamp == stamp && known.Size == size) return known.Unit;
             var card = Sprocket.Vehicles.Serialization.VehicleCard.LoadVehicleCard(path);
             var unit = card == null ? null : UnitSelectionLoader.NewUnit(card);
-            if (unit != null) Units[path] = unit;
-            else Trace.Write($"couldn't read the design {path}");
+            if (unit != null) Units[path] = (unit, stamp, size);
+            else Units.Remove(path);
+            if (unit == null) Trace.Write($"couldn't read the design {path}");
             return unit;
         }
-        catch (Exception ex) { Trace.Write($"couldn't read the design {path}: {ex.Message}"); return null; }
+        catch (Exception ex) { Trace.Write($"couldn't read the design {blueprint}: {ex.Message}"); return null; }
     }
 
-    static readonly Dictionary<string, UnitDefinition> Units = new(StringComparer.OrdinalIgnoreCase);
+    static readonly Dictionary<string, (UnitDefinition Unit, long Stamp, long Size)> Units = new(StringComparer.OrdinalIgnoreCase);
 
-    /// Once the restarted battle's tanks are all in: each moved to where it was placed, turned as placed, at the height
-    /// above the ground the game gave it. Called every frame; does nothing when there's nothing to place.
+    /// Register each completed native spawn without relocating an enabled physics assembly.
+    /// Start the mission once all of the battle's tanks have spawned.
     internal static void PlaceSpawned()
     {
-        if (toPlace == null) return;
+        if (restart != null || toPlace == null) return;
+        if (!SpawnPlan.ReadyFor(Mode))
+        {
+            if (SpawnPlan.Failure is { } failure)
+            {
+                Trace.Write($"spawn plan: registration cancelled: {failure}");
+                BattleEditor.Tell($"Couldn't prepare the battle's spawn positions: {failure}");
+                toPlace = null;
+                return;
+            }
+            // Initial scene loading hasn't installed the plan yet. Never silently start orders at default spawns.
+            if (Time.unscaledTime - placeSince > 240)
+            {
+                Trace.Write("spawn plan: no active native spawn plan after 4 minutes; battle registration stopped");
+                BattleEditor.Tell("The battle's spawn positions couldn't be prepared. See SprocketBattles-trace.log.");
+                toPlace = null;
+            }
+            return;
+        }
         var spawns = Mode?.vehicleSpawns;
         var fresh = new List<VehicleSpawn>();
         if (spawns != null)
             for (int i = 0; i < spawns.Count; i++)
                 if (spawns[i] != null && !before.Contains(spawns[i].Pointer)) fresh.Add(spawns[i]);
-        if (fresh.Count < toPlace.Count || fresh.Any(s => !s.Spawned))
-        {
-            if (Time.unscaledTime - placeSince > 240) { Trace.Write($"placing: gave up, {fresh.Count} of {toPlace.Count} tanks spawned in 4 minutes"); toPlace = null; }
-            return;
-        }
         var order = toPlace;
-        toPlace = null;
-        var tanks = new Dictionary<string, VehicleBehaviour>();
-        for (int i = 0; i < order.Count; i++)
+        var pending = Enumerable.Range(0, Math.Min(order.Count, fresh.Count))
+            .Where(i => fresh[i].Spawned && !placed.ContainsKey(order[i].Id)).ToList();
+        var joints = pending.Count > 0 ? UnityEngine.Object.FindObjectsOfType<Joint>() : null;
+        if (pending.Count > 0) Physics.SyncTransforms();
+        foreach (int i in pending)
         {
             var gateway = fresh[i].Vehicle?.TryCast<IVehicleGateway>();
             var root = gateway?.transform;
             if (root == null) { Trace.Write($"placing: tank {i} has no transform"); continue; }
-            if (!order[i].AtSpawn)
+            var spawn = root.position;
+            var assembly = SpawnAssembly.Capture(root, joints!, order[i].Id);
+            if (!assembly.HasHealthyPose)
             {
-                var target = Files.Vector(order[i].Position);
-                float above = root.position.y - GroundBelow(root, root.position);
-                root.SetPositionAndRotation(new Vector3(target.x, target.y + Math.Max(0.1f, above), target.z), Quaternion.Euler(0, order[i].Yaw, 0));
-                foreach (var body in root.GetComponentsInChildren<Rigidbody>()) { body.velocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+                Trace.Write($"placing: {order[i].Id} already has an invalid native spawn pose at {spawn}; registration stopped");
+                BattleEditor.Tell($"{order[i].Id} has an invalid native spawn pose. See SprocketBattles-trace.log.");
+                toPlace = null;
+                return;
             }
+            // Native physics jobs maintain their own body state. The spawn plan already supplies the authored
+            // pose before component setup; changing it here can throw a tank hundreds of metres upward.
+            Trace.Write($"placing: {order[i].Id} registered native pose {spawn}; no live relocation");
+            placed[order[i].Id] = new PlacedTank { Assembly = assembly, At = root.position, Since = Time.time };
             if ((gateway!.Behaviour?.TryCast<VehicleBehaviour>() ?? root.GetComponentInChildren<VehicleBehaviour>()) is { } tank)
             {
-                tanks[order[i].Id] = tank;
+                tanksById[order[i].Id] = tank;
                 var unit = order[i];
-                Guard.Run("travel", () => Travel.Learn(unit.Blueprint, gateway, tank.Mass));
-                Guard.Run("shapes", () => Shapes.Learn(unit.Blueprint, root));
+                // A designer draft is a one-off file (new each Play): nothing to keep its shape or speed for.
+                if (!Files.Absolute(unit.Blueprint).StartsWith(Path.Combine(Files.Battles, "Drafts"), StringComparison.OrdinalIgnoreCase))
+                {
+                    Guard.Run("travel", () => Travel.Learn(unit.Blueprint, gateway, tank.Mass));
+                    Guard.Run("shapes", () => Shapes.Learn(unit.Blueprint, root));
+                }
             }
         }
-        Physics.SyncTransforms();
-        Trace.Write($"placing: moved {order.Count} tanks to where they were placed");
+        if (pending.Count > 0) Physics.SyncTransforms();
+        if (placed.Count < order.Count)
+        {
+            if (Time.unscaledTime - placeSince > 240)
+            {
+                Trace.Write($"placing: gave up, {placed.Count} of {order.Count} tanks placed in 4 minutes");
+                toPlace = null;
+                BattleEditor.Tell("Some tanks didn't finish spawning. See SprocketBattles-trace.log.");
+            }
+            return;
+        }
+        toPlace = null;
+        var tanks = new Dictionary<string, VehicleBehaviour>(tanksById);
+        Trace.Write($"placing: registered {order.Count} tanks spawned at the planned native positions");
+        foreach (var (id, t) in tanks)
+            if (t != null && t.ControlType == Sprocket.Vehicles.Control.ControlType.Player && placed.TryGetValue(id, out var p))
+            {
+                var bodies = p.Root.GetComponentsInChildren<Rigidbody>();
+                Trace.Write($"placing: you drive {id}: {bodies.Length} bodies ({bodies.Count(b => b.isKinematic)} kinematic), {p.Root.GetComponentsInChildren<Joint>().Length} joints");
+            }
         StartOrders(order, tanks);
         if (playing != null)
         {
@@ -244,6 +434,24 @@ internal static class Battle
                 BattleEditor.Tell($"{playing.Name} was made on {playing.Map}, but the game started {Map(on)}: the tanks may be off the map.");
             }
             Guard.Run("mission", () => Mission.Start(playing, tanks));
+            try { FreeForAll.Start(playing, tanks); }
+            catch (Exception ex)
+            {
+                Trace.Write($"free-for-all: setup failed: {ex}");
+                StopOrders();
+                playing = null;
+                Mission.Stop();
+                Mission.End(false, "BATTLE SETUP FAILED", $"Couldn't start Free-for-All: {ex.Message}. See SprocketBattles-trace.log.");
+                BattleEditor.Tell($"Couldn't start Free-for-All: {ex.Message}");
+                return;
+            }
+            try { Gauntlet.Started(playing, tanks); }
+            catch (Exception ex)
+            {
+                Trace.Write($"gauntlet: setup failed: {ex}");
+                Mission.End(false, "BATTLE SETUP FAILED", ex.Message);
+                return;
+            }
             BattleEditor.Started(playing, tanks);
         }
     }
@@ -268,18 +476,44 @@ internal static class Battle
 
     static List<Runner>? runners;
     static Dictionary<string, VehicleBehaviour> tanksById = new();
+    static Dictionary<string, BattleUnit> unitsById = new();
     static float nextTick;
 
     static void StartOrders(List<BattleUnit> units, Dictionary<string, VehicleBehaviour> tanks)
     {
         tanksById = tanks;
+        unitsById = units.ToDictionary(u => u.Id);
         idByTank = tanks.Where(p => p.Value != null).ToDictionary(p => p.Value.Pointer, p => p.Key);
         held.Clear();
         // Every tank with orders runs them whenever the AI drives it: the tank the player drives waits (see Step).
-        runners = units.Where(u => u.Orders != null && tanks.ContainsKey(u.Id))
+        runners = units.Where(u => !u.ForceStopped && u.Orders != null && tanks.ContainsKey(u.Id))
                        .Select(u => new Runner { Unit = u, Tank = tanks[u.Id], Since = Time.time }).ToList();
         foreach (var r in runners) Hold(r.Tank);
-        driver = units.FirstOrDefault(u => u.Control == "player" && tanks.ContainsKey(u.Id));
+        // A tank with no path holds its ground and only shoots: the game's orders (a mission's advance, its formation)
+        // are dropped. A quick battle's tanks (all left at the game's spawns) keep the game's AI.
+        bool quick = units.All(u => u.AtSpawn);
+        int holding = 0, locked = 0;
+        ClearMovementHolds(); thrown.Clear();
+        Puppet.Unlock();
+        foreach (var u in units)
+        {
+            if (!tanks.TryGetValue(u.Id, out var tank) || tank == null) continue;
+            // Track the current player too: if control later passes to another tank, its idle AI must hold.
+            if (!quick || u.ForceStopped) idleCandidates[tank.Pointer] = tank;
+            if (u.ForceStopped) explicitStops.Add(tank.Pointer);
+            // Not the tank you drive (the game picks one when none is marked): 0.17.6 held it too and the view went blank.
+            if (u.Control == "player" || tank.ControlType == Sprocket.Vehicles.Control.ControlType.Player) continue;
+            // Holding applies only to the driver: the commander keeps seeing targets and the guns keep firing.
+            if (MovementHoldPolicy.AtStart(quick, u.ForceStopped, u.Path.Count))
+            {
+                Hold(tank);
+                SetMovementHold(tank);
+                holding++;
+            }
+            if (u.NoTurret || u.NoFire) { Puppet.Lock(tank, u.NoTurret, u.NoFire); locked++; }
+        }
+        driver = units.FirstOrDefault(u => !u.Reserve && u.Control == "player" && tanks.ContainsKey(u.Id));
+        Trace.Write($"orders: {holding} tanks with no path hold their ground, {locked} with their turret or fire kept still");
         nextTick = Time.time + 2; // the battle settles first
         Trace.Write($"orders: {runners.Count} tanks have a path or a target, {tanks.Count} tanks found{(driver != null ? $", you drive {driver.Id}" : "")}");
         foreach (var r in runners)
@@ -303,8 +537,163 @@ internal static class Battle
     // The tank marked "you drive it", handed to the player on the first tick (the game gives the player its own pick at spawn).
     static BattleUnit? driver;
 
-    internal static void StopOrders() { runners = null; attacks.Clear(); held.Clear(); blocked.Clear(); }
+    internal static void StopOrders()
+    {
+        FreeForAll.Stop();
+        runningScene = null;
+        if (restart != null) Trace.Write($"play '{restart.Name}': queued restart cancelled");
+        restart = null;
+        runners = null; attacks.Clear(); held.Clear(); blocked.Clear(); ClearMovementHolds();
+        tanksById.Clear(); unitsById.Clear(); idByTank.Clear(); driver = null;
+        placed.Clear(); thrown.Clear();
+        SpawnSafety.Clear();
+        SpawnPlan.Clear();
+    }
 
+    // ---------- driver-only stopping ----------
+    // Do not send a move back to the original position: it made a stopped tank reposition itself after a push.
+    // Native movement tasks are cleared and the crew's ordinary controls brake it; physics and gun AI stay active.
+    static readonly Dictionary<IntPtr, VehicleBehaviour> idleCandidates = new();
+    static readonly Dictionary<IntPtr, VehicleBehaviour> movementHolds = new();
+    static readonly Dictionary<IntPtr, VehicleBehaviour> heldDrivers = new();
+    static readonly Dictionary<IntPtr, Vector3> manualMoves = new();
+    static readonly Dictionary<IntPtr, float> manualMoveSince = new();
+    static readonly Dictionary<IntPtr, MovementBrake> brakes = new();
+    static readonly HashSet<IntPtr> stoppedCommanders = new();
+    // An idle tank can receive an automatic FFA goal; an explicit Stop must remain until a new player order.
+    static readonly HashSet<IntPtr> explicitStops = new();
+
+    static void ClearMovementHolds()
+    {
+        foreach (var tank in movementHolds.Values)
+            if (tank != null && tank.ControlType != Sprocket.Vehicles.Control.ControlType.Player)
+                Guard.Run("release stopped driver", () => { if (Commander(tank)?.driver?.target is { } drive) drive.Solution = default; });
+        movementHolds.Clear(); heldDrivers.Clear(); idleCandidates.Clear(); manualMoves.Clear(); brakes.Clear(); stoppedCommanders.Clear(); explicitStops.Clear();
+        manualMoveSince.Clear();
+    }
+
+    static void ReleaseMovementHold(VehicleBehaviour tank)
+    {
+        explicitStops.Remove(tank.Pointer);
+        bool stopped = movementHolds.Remove(tank.Pointer);
+        if (Commander(tank) is { } ai) stoppedCommanders.Remove(ai.Pointer);
+        foreach (var key in heldDrivers.Where(p => p.Value == null || p.Value.Pointer == tank.Pointer).Select(p => p.Key).ToList())
+        { heldDrivers.Remove(key); brakes.Remove(key); }
+        if (stopped && tank.ControlType != Sprocket.Vehicles.Control.ControlType.Player && Commander(tank)?.driver?.target is { } drive)
+            drive.Solution = default;
+    }
+
+    static void SetMovementHold(VehicleBehaviour tank)
+    {
+        var ai = Commander(tank);
+        if (ai?.driver is not { } drive || tank.ControlType == Sprocket.Vehicles.Control.ControlType.Player) return;
+        if (UnitOf(tank) is { } unit && Mission.Waiting(unit.Id)) return;
+        if (movementHolds.TryAdd(tank.Pointer, tank))
+        {
+            ai.oneOffMoveOrderCts?.Cancel();
+            ai.formationTasksCts?.Cancel();
+            ai.formation?.Exit();
+            Trace.Write($"order {NameOf(tank)}: force stop; aiming and firing remain active");
+        }
+        stoppedCommanders.Add(ai.Pointer);
+        heldDrivers[drive.Pointer] = tank;
+        Brake(drive);
+    }
+
+    static void Brake(DriverAI driver)
+    {
+        driver.ClearTasks();
+        driver.ClearPath();
+        if (driver.target is not { } target) return;
+        float speed = driver.body != null ? Vector3.Dot(driver.body.linearVelocity, driver.body.transform.forward) : 0;
+        if (!brakes.TryGetValue(driver.Pointer, out var brake)) brakes[driver.Pointer] = brake = new MovementBrake();
+        target.Solution = new DriveSolution { Steer = 0, Throttle = brake.Throttle(speed) };
+    }
+
+    /// Called by the driver hook only: manual controls and unrelated AI tanks always retain their ordinary input.
+    internal static bool StopDriver(DriverAI driver)
+    {
+        if (!heldDrivers.TryGetValue(driver.Pointer, out var tank)) return false;
+        if (tank == null) { heldDrivers.Remove(driver.Pointer); return false; }
+        if (tank.ControlType == Sprocket.Vehicles.Control.ControlType.Player || Puppet.Of(tank)?.Drive == true) return false;
+        Brake(driver);
+        return true;
+    }
+
+    internal static bool IsForceStopped(VehicleBehaviour tank) => tank != null && movementHolds.ContainsKey(tank.Pointer);
+
+    /// Replace all movement with braking. This affects the AI driver, leaving its gun crews and physics running.
+    internal static bool ForceStop(VehicleBehaviour tank)
+    {
+        if (tank == null || tank.ControlType == Sprocket.Vehicles.Control.ControlType.Player || Commander(tank)?.driver == null) return false;
+        Free(tank);
+        Hold(tank);
+        explicitStops.Add(tank.Pointer);
+        idleCandidates[tank.Pointer] = tank;
+        Commander(tank)?.attackOrderCts?.Cancel();
+        FireAtWill(tank);
+        SetMovementHold(tank);
+        return IsForceStopped(tank);
+    }
+
+    static void HoldIdleDrivers()
+    {
+        foreach (var (key, tank) in idleCandidates.ToList())
+        {
+            if (tank == null) { idleCandidates.Remove(key); movementHolds.Remove(key); continue; }
+            if (tank.ControlType == Sprocket.Vehicles.Control.ControlType.Player || Puppet.Of(tank)?.Drive == true) continue;
+            var unit = UnitOf(tank);
+            if (unit != null && Mission.Waiting(unit.Id)) continue;
+            if (IsForceStopped(tank)) { SetMovementHold(tank); continue; }
+            var runner = runners?.FirstOrDefault(r => r.Tank != null && r.Tank.Pointer == tank.Pointer);
+            bool path = runner != null && runner.Step < runner.Unit.Path.Count;
+            bool attacking = attacks.Any(a => a.Tank != null && a.Tank.Pointer == tank.Pointer && !Out(a.Enemy)
+                && (a.Automatic || a.Approach != AttackApproachType.Passive));
+            bool moving = manualMoves.TryGetValue(tank.Pointer, out var destination);
+            if (moving && MovementHoldPolicy.ManualFinished(Flat(tank.Position, destination),
+                    Time.time - manualMoveSince.GetValueOrDefault(tank.Pointer), Commander(tank)?.driver?.CurrentTask != null))
+            { manualMoves.Remove(tank.Pointer); manualMoveSince.Remove(tank.Pointer); moving = false; }
+            if (MovementHoldPolicy.Idle(path, attacking, moving)) { Hold(tank); SetMovementHold(tank); }
+        }
+    }
+
+    // ---------- startup physics diagnostics ----------
+
+    // Watch the assembly only through the initial spawn window; native job buffers cannot be repaired by teleporting.
+    sealed class PlacedTank
+    {
+        internal SpawnAssembly Assembly = null!;
+        internal Transform Root => Assembly.Root;
+        internal Vector3 At;
+        internal float Since;
+    }
+    static readonly Dictionary<string, PlacedTank> placed = new();
+    static readonly HashSet<string> thrown = new();
+
+    // Run every frame during startup, independently of AI orders and their initial two-second delay.
+    static void WatchThrown()
+    {
+        foreach (var (id, pose) in placed)
+        {
+            if (pose.Root == null || thrown.Contains(id) || Time.time - pose.Since > 8) continue;
+            var position = pose.Root.position;
+            bool invalid = pose.Assembly.HasInvalidPhysics;
+            bool launched = false;
+            // No ground queries while the tank stays near its placement height. Unknown ground isn't proof of a launch.
+            if (!invalid && position.y - pose.At.y > 30)
+                launched = SpawnGround.Height(position.x, position.z, pose.At.y) is { } floor && position.y - floor > 30;
+            if (!invalid && !launched) continue;
+            thrown.Add(id);
+            bool player = tanksById.TryGetValue(id, out var tank) && tank != null
+                && tank.ControlType == Sprocket.Vehicles.Control.ControlType.Player;
+            Trace.Write($"thrown: {id} is at {position} ({(invalid ? "invalid physics" : "above the ground")}, {(player ? "you drive it" : "AI")})");
+            // Moving an enabled track cannot reset its private solver state; keep the evidence without repeating it.
+            BattleEditor.Tell($"{id} developed invalid spawn physics. See SprocketBattles-trace.log.");
+        }
+        if (toPlace == null)
+            foreach (var id in placed.Where(p => p.Value.Root == null || Time.time - p.Value.Since > 8).Select(p => p.Key).ToList())
+            { placed.Remove(id); thrown.Remove(id); }
+    }
     // ---------- your orders over the game's ----------
 
     /// Your orders override the game's: a tank you command (its battle path and target, or the command view's orders)
@@ -317,7 +706,8 @@ internal static class Battle
     static readonly HashSet<(IntPtr, string)> blocked = new();
     static bool sending;
 
-    internal static bool Holds(Sprocket.ArtificialIntelligence.CommanderAI ai) => OverrideGame && held.ContainsKey(ai.Pointer);
+    internal static bool Holds(Sprocket.ArtificialIntelligence.CommanderAI ai) => held.ContainsKey(ai.Pointer)
+        && (OverrideGame || stoppedCommanders.Contains(ai.Pointer));
 
     internal static bool Commanded(VehicleBehaviour tank) => Commander(tank) is { } ai && held.ContainsKey(ai.Pointer);
 
@@ -342,10 +732,10 @@ internal static class Battle
         finally { sending = false; }
     }
 
-    /// From now on the tank takes your orders only: out of its formation, its formation tasks cancelled.
-    static void Hold(VehicleBehaviour tank)
+    /// From now on the tank takes your orders only: out of its formation (if asked), its formation tasks cancelled.
+    static void Hold(VehicleBehaviour tank, bool leaveFormation = true)
     {
-        if (Commander(tank) is not { } ai || !held.TryAdd(ai.Pointer, NameOf(tank))) return;
+        if (Commander(tank) is not { } ai || !held.TryAdd(ai.Pointer, NameOf(tank)) || !leaveFormation) return;
         try
         {
             ai.formationTasksCts?.Cancel();
@@ -357,6 +747,10 @@ internal static class Battle
     /// Back to the game's AI: no path, target or hold of yours.
     internal static void Free(VehicleBehaviour tank)
     {
+        ReleaseMovementHold(tank);
+        idleCandidates.Remove(tank.Pointer);
+        manualMoves.Remove(tank.Pointer);
+        manualMoveSince.Remove(tank.Pointer);
         runners?.RemoveAll(r => r.Tank != null && r.Tank.Pointer == tank.Pointer);
         if (attacks.RemoveAll(a => a.Tank == null || a.Tank.Pointer == tank.Pointer) > 0) Commander(tank)?.attackOrderCts?.Cancel();
         if (Commander(tank) is { } ai) held.Remove(ai.Pointer);
@@ -367,6 +761,7 @@ internal static class Battle
     {
         if (Mode?.vehicleControlState is not { } control || tank.TryCast<IVehicleBehaviour>() is not { } target) return false;
         Free(tank);
+        Puppet.Unlock(tank); // your own aim and trigger
         control.SetControlTarget(target);
         Trace.Write($"you drive {NameOf(tank)} (team {(int)tank.ID.TeamID}) now");
         return true;
@@ -410,8 +805,11 @@ internal static class Battle
     /// Twice a second of battle time (so nothing moves on while the battle is frozen).
     internal static void RunOrders()
     {
-        if ((runners == null && attacks.Count == 0) || Time.time < nextTick) return;
+        if (placed.Count > 0) Guard.Run("spawn safety", WatchThrown);
+        Guard.Run("idle driver holds", HoldIdleDrivers);
+        if (Time.time < nextTick) return;
         nextTick = Time.time + 0.5f;
+        Guard.Run("team auto engagement", AutoEngageTeams);
         Guard.Run("attacks", WatchAttacks);
         if (driver != null)
         {
@@ -421,12 +819,34 @@ internal static class Battle
                 if (mine != null && Mode?.vehicleControlState is { } control && mine.TryCast<IVehicleBehaviour>() is { } tank)
                 {
                     control.SetControlTarget(tank);
+                    ReleaseMovementHold(mine);
                     Trace.Write($"you drive {driver.Id} now");
                 }
             });
             driver = null;
         }
         if (runners != null) foreach (var r in runners) Guard.Run($"orders for {r.Unit.Id}", () => Step(r));
+        Guard.Run("idle driver holds", HoldIdleDrivers);
+    }
+
+    static void AutoEngageTeams()
+    {
+        if (playing == null || playing.FreeForAll || Gauntlet.IsCurrent(playing)) return;
+        foreach (var tank in tanksById.Values.Distinct())
+        {
+            if (tank == null || Out(tank) || !CanAutoEngage(tank)) continue;
+            var currentTarget = AutomaticTarget(tank);
+            if (currentTarget != null && !Out(currentTarget)) continue;
+            var opponent = tanksById.Values
+                .Where(o => o != null && !Out(o) && (UnitOf(tank) is { } ut && UnitOf(o) is { } uo ? ut.Team != uo.Team : (tank.ID.TeamID & o.ID.TeamID) == 0))
+                .OrderBy(o => Flat(tank.Position, o.Position))
+                .FirstOrDefault();
+            if (opponent != null)
+            {
+                SendAutoAgainst(tank, opponent);
+                FireAtWill(tank);
+            }
+        }
     }
 
     static void Step(Runner r)
@@ -482,7 +902,9 @@ internal static class Battle
             return;
         }
         if (r.Step++ > path.Count) return;
-        if (foe != null) StartAttack(r.Tank, foe, $"{r.Unit.Id} on {r.Unit.Attack!.Target}", r.Unit.Attack.Engage != "fireOnTheMove", AttackApproachType.Aggressive);
+        // After its path it goes for the target; with no path it shoots it from where it stands.
+        if (foe != null) StartAttack(r.Tank, foe, $"{r.Unit.Id} on {r.Unit.Attack!.Target}", r.Unit.Attack.Engage != "fireOnTheMove",
+                                     path.Count > 0 ? AttackApproachType.Aggressive : AttackApproachType.Passive);
     }
 
     /// Drive to `to`; with `face`, stop there facing that way (a point on the way has none, so it isn't braked for).
@@ -530,6 +952,8 @@ internal static class Battle
         if (!TakeOver(tank)) return false;
         FireAtWill(tank);
         Send(tank.OrderReciever, MoveOrder(to, face));
+        manualMoves[tank.Pointer] = to;
+        manualMoveSince[tank.Pointer] = Time.time;
         return true;
     }
 
@@ -547,6 +971,7 @@ internal static class Battle
         var receiver = tank.OrderReciever;
         if (receiver == null || !receiver.CanReceiveOrder || tank.ControlType == Sprocket.Vehicles.Control.ControlType.Player) return false;
         Hold(tank);
+        idleCandidates[tank.Pointer] = tank;
         return true;
     }
 
@@ -559,6 +984,9 @@ internal static class Battle
         public VehicleBehaviour Tank = null!, Enemy = null!;
         public string Name = "";
         public bool StopToFire;
+        public bool Automatic;
+        public bool Closing;
+        public float LastSeenAt;
         public AttackApproachType Approach;
         public float Since, GivenAt, LoggedAt;
     }
@@ -566,10 +994,10 @@ internal static class Battle
     static readonly List<Attack> attacks = new();
 
     static void StartAttack(VehicleBehaviour tank, VehicleBehaviour enemy, string name, bool stopToFire,
-                            AttackApproachType approach = AttackApproachType.Aggressive)
+                            AttackApproachType approach = AttackApproachType.Aggressive, bool automatic = false)
     {
         attacks.RemoveAll(a => a.Tank == null || a.Tank.Pointer == tank.Pointer);
-        var attack = new Attack { Tank = tank, Enemy = enemy, Name = name, StopToFire = stopToFire, Approach = approach, Since = Time.time, LoggedAt = Time.time };
+        var attack = new Attack { Tank = tank, Enemy = enemy, Name = name, StopToFire = stopToFire, Approach = approach, Automatic = automatic, Since = Time.time, LoggedAt = Time.time };
         attacks.Add(attack);
         GiveAttack(attack, "given");
     }
@@ -578,16 +1006,104 @@ internal static class Battle
     {
         var receiver = a.Tank.OrderReciever;
         if (receiver == null || !receiver.CanReceiveOrder) return;
+        if (a.Automatic || a.Approach != AttackApproachType.Passive) ReleaseMovementHold(a.Tank);
         FireAtWill(a.Tank);
+        if (Commander(a.Tank) is { } cmd)
+        {
+            cmd.FireMode = Sprocket.ArtificialIntelligence.FireMode.FireAtWill;
+        }
         var order = AttackOrderOn(a.Enemy, a.StopToFire, a.Approach);
         Send(receiver, order);
         a.GivenAt = Time.time;
         Trace.Write($"attack {a.Name} {how}: {order.GetLog(receiver)}; {Sight(a.Tank, a.Enemy)}");
     }
 
-    /// Out of the fight: can neither move nor shoot (or gone).
-    static bool Out([System.Diagnostics.CodeAnalysis.NotNullWhen(false)] VehicleBehaviour? tank) =>
-        tank == null || (tank.Flags & (VehicleFlags.Mobile | VehicleFlags.Armed)) == 0;
+    /// Out of the fight: can neither move nor shoot, or all crew knocked out, or hull/components destroyed (or gone).
+    internal static bool Out([System.Diagnostics.CodeAnalysis.NotNullWhen(false)] VehicleBehaviour? tank)
+    {
+        if (tank == null || tank.Pointer == IntPtr.Zero || tank.WasCollected) return true;
+        try
+        {
+            if (!tank.gameObject.activeInHierarchy || !tank.enabled) return true;
+            var flags = tank.Flags;
+            if ((flags & VehicleFlags.Enabled) == 0) return true;
+            if ((flags & (VehicleFlags.Mobile | VehicleFlags.Armed)) == 0) return true;
+
+            int totalCrew = 0;
+            int aliveCrew = 0;
+            double currentHp = 0;
+            double maxHp = 0;
+
+            var entries = tank.healthRegister?.entries;
+            int count = entries?.Count ?? 0;
+            for (int i = 0; i < count; i++)
+            {
+                var comp = entries![i];
+                if (comp == null || comp.Pointer == IntPtr.Zero || comp.WasCollected) continue;
+                var durable = comp.HealthPool;
+                if (durable != null)
+                {
+                    var h = durable.HealthInfo;
+                    if (float.IsFinite(h.Current) && float.IsFinite(h.Max) && h.Max > 0)
+                    {
+                        currentHp += Math.Clamp(h.Current, 0, h.Max);
+                        maxHp += h.Max;
+                    }
+                }
+
+                var owner = comp.Owner;
+                if (owner == null || owner.Pointer == IntPtr.Zero || owner.WasCollected) continue;
+                if (owner.TryCast<Sprocket.Vehicles.CrewSystems.CrewSeat>() is { } seat)
+                {
+                    totalCrew++;
+                    float cur = durable?.HealthInfo.Current ?? 1f;
+                    if (seat.HealthFraction > 0.001f && cur > 0.001f)
+                        aliveCrew++;
+                }
+                else if (owner.GetIl2CppType()?.Name?.IndexOf("Crew", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    totalCrew++;
+                    float cur = durable?.HealthInfo.Current ?? 1f;
+                    if (owner.HealthFraction > 0.001f && cur > 0.001f)
+                        aliveCrew++;
+                }
+            }
+
+            if (totalCrew == 0)
+            {
+                var seats = tank.GetComponentsInChildren<Sprocket.Vehicles.CrewSystems.CrewSeat>(true);
+                if (seats != null && seats.Length > 0)
+                {
+                    for (int i = 0; i < seats.Length; i++)
+                    {
+                        var s = seats[i];
+                        if (s != null && s.Pointer != IntPtr.Zero && !s.WasCollected)
+                        {
+                            totalCrew++;
+                            float cur = s.healthPool?.HealthInfo.Current ?? 1f;
+                            if (s.HealthFraction > 0.001f && cur > 0.001f)
+                                aliveCrew++;
+                        }
+                    }
+                }
+            }
+
+            if (totalCrew > 0 && aliveCrew == 0) return true;
+            if (maxHp > 0 && currentHp <= 0.001) return true;
+        }
+        catch
+        {
+            try
+            {
+                return (tank.Flags & (VehicleFlags.Mobile | VehicleFlags.Armed)) == 0;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     static void WatchAttacks()
     {
@@ -599,6 +1115,7 @@ internal static class Battle
                 Trace.Write($"attack {a.Name}: over, the target {(a.Enemy == null ? "is gone" : $"is out of the fight (flags {a.Enemy.Flags})")}");
                 continue;
             }
+            if (a.Automatic) Guard.Run($"automatic approach {a.Name}", () => WatchAutoApproach(a));
             var commander = a.Tank.OrderReciever?.TryCast<Sprocket.ArtificialIntelligence.CommanderAI>();
             var cts = commander?.attackOrderCts;
             bool active = cts != null && !cts.IsCancellationRequested;
@@ -646,6 +1163,7 @@ internal static class Battle
     internal static List<Vector3> Route(VehicleBehaviour tank)
     {
         var route = new List<Vector3>();
+        if (IsForceStopped(tank)) return route;
         var driver = tank.OrderReciever?.TryCast<Sprocket.ArtificialIntelligence.CommanderAI>()?.driver;
         var corners = driver?.pathCorners;
         if (driver == null || corners == null || corners.Length == 0) return route;
@@ -657,13 +1175,14 @@ internal static class Battle
     /// What a tank's AI is doing now, as the game names the task ("MoveToPositionTask", ...), or "" if nothing.
     internal static string Task(VehicleBehaviour tank)
     {
+        if (IsForceStopped(tank)) return "Force stopped";
         try { return tank.OrderReciever?.TryCast<Sprocket.ArtificialIntelligence.CommanderAI>()?.driver?.CurrentTask?.GetIl2CppType()?.Name ?? ""; }
         catch (Exception) { return ""; }
     }
 
     /// The battle file's tank for a game tank, if it was placed in the editor.
     internal static BattleUnit? UnitOf(VehicleBehaviour tank) =>
-        idByTank.TryGetValue(tank.Pointer, out var id) ? runners?.FirstOrDefault(r => r.Unit.Id == id)?.Unit ?? new BattleUnit { Id = id } : null;
+        idByTank.TryGetValue(tank.Pointer, out var id) && unitsById.TryGetValue(id, out var unit) ? unit : null;
 
     static Dictionary<IntPtr, string> idByTank = new();
 
@@ -679,6 +1198,7 @@ internal static class Battle
 
     static void Give(Runner r, IOrderReceiver receiver, Order order)
     {
+        ReleaseMovementHold(r.Tank);
         Send(receiver, order);
         r.Given = true;
         Trace.Write($"order {r.Unit.Id}: {order.GetLog(receiver)}");
@@ -698,17 +1218,12 @@ internal static class Battle
     static float Flat(Vector3 a, Vector3 b) => Vector2.Distance(new Vector2(a.x, a.z), new Vector2(b.x, b.z));
 
     static List<BattleUnit>? toPlace;
+    internal static bool PendingPlacement => toPlace != null;
+    internal static IReadOnlyList<BattleUnit>? PendingUnits => toPlace;
     static float placeSince;
     // The battle's spawns from before the restart, to tell the new ones apart if the game keeps the old in its list.
     static readonly HashSet<IntPtr> before = new();
 
-    /// The height of the ground under `at`, not counting the tank itself (or `at` if nothing's there).
-    static float GroundBelow(Transform tank, Vector3 at)
-    {
-        foreach (var hit in Physics.RaycastAll(at + Vector3.up * 50, Vector3.down, 500).OrderBy(h => h.distance))
-            if (hit.collider != null && !hit.collider.transform.IsChildOf(tank)) return hit.point.y;
-        return at.y;
-    }
 }
 
 /// A line straight to BepInEx\SprocketBattles-trace.log, written at once: the game's own log is written in batches,
@@ -718,16 +1233,17 @@ internal static class Trace
     static readonly string File = System.IO.Path.Combine(BepInEx.Paths.BepInExRootPath, "SprocketBattles-trace.log");
     // Kept open and flushed per line: opening the file for every line cost more than the line, with many tanks ordered.
     static StreamWriter? writer;
+    static readonly object writerLock = new();
 
     internal static void Write(string line)
     {
         Plugin.ModLog.LogInfo(line);
-        try
+        lock (writerLock) try
         {
             writer ??= new StreamWriter(new FileStream(File, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
             writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {line}");
         }
-        catch (Exception) { writer = null; }
+        catch (Exception) { try { writer?.Dispose(); } catch { } writer = null; }
     }
 }
 
@@ -779,8 +1295,8 @@ internal static class Files
     }
 
     internal static string Absolute(string path) =>
-        path.StartsWith("game:", StringComparison.OrdinalIgnoreCase) ? Path.Combine(Application.streamingAssetsPath, path[5..])
-        : Path.IsPathRooted(path) ? path : Path.Combine(Root, path);
+        Path.GetFullPath(path.StartsWith("game:", StringComparison.OrdinalIgnoreCase) ? Path.Combine(Application.streamingAssetsPath, path[5..])
+        : Path.IsPathRooted(path) ? path : Path.Combine(Root, path));
 
     /// The vehicles that come with the game (its scenarios' AT guns and tanks, historical tanks, targets), AT guns first.
     internal static List<(string Path, string Name)> GameDesigns()
@@ -792,9 +1308,9 @@ internal static class Files
             .Select(p => (Relative(p), $"{Path.GetFileNameWithoutExtension(p)} (base game)")).ToList();
     }
 
-    /// An anti-tank gun by its name ("NTL AT Gun", "TaigaATGun", "FieldsLightAT").
+    /// An anti-tank gun by its name ("NTL AT Gun", "TaigaATGun"). The game's "FieldsLightAT" is a whole tank, not one.
     internal static bool IsATGun(string path) =>
-        System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileNameWithoutExtension(path), @"AT( ?Gun)?$|ATGun", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileNameWithoutExtension(path), @"AT ?Gun", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// The faction a design is from (its folder in Factions), or "Base game" for the game's own vehicles.
     internal static string FactionOf(string path)
@@ -804,9 +1320,33 @@ internal static class Files
         return parts.Length > 2 && parts[0].Equals("Factions", StringComparison.OrdinalIgnoreCase) ? parts[1] : "Other";
     }
 
-    /// The game's eras (StreamingAssets\Eras, custom ones dropped in there too), oldest first; read once.
-    internal static List<Eras.Era> EraList() => eras ??= Eras.Read(Path.Combine(Application.streamingAssetsPath, "Eras"));
+    /// The game's eras (StreamingAssets\Eras, custom ones dropped in there too, and custom eras from blueprints), oldest first; read once.
+    internal static List<Eras.Era> EraList() => eras ??= LoadEras();
     static List<Eras.Era>? eras;
+
+    static List<Eras.Era> LoadEras()
+    {
+        var list = Eras.Read(Path.Combine(Application.streamingAssetsPath, "Eras"));
+        eras = list;
+        try
+        {
+            var known = new HashSet<string>(list.Select(e => e.Name), StringComparer.OrdinalIgnoreCase);
+            DateTime latest = list.Count > 0 ? list[^1].Start : new DateTime(1945, 9, 3);
+            int extraYears = 5;
+            foreach (var d in Files.Designs())
+            {
+                string era = Files.EraOf(d.Path);
+                if (!string.IsNullOrEmpty(era) && !era.Equals("No era", StringComparison.OrdinalIgnoreCase) && known.Add(era))
+                {
+                    latest = latest.AddYears(extraYears);
+                    list.Add(new Eras.Era(era, latest));
+                    Trace.Write($"eras: discovered custom blueprint era '{era}', ranked at {latest:yyyy.MM.dd}");
+                }
+            }
+        }
+        catch (Exception ex) { Trace.Write($"eras: custom era scan exception: {ex.Message}"); }
+        return list;
+    }
 
     /// The era a design is from (by the date in its header, or the era it names), or "No era"; looked up again when
     /// its file changes.
@@ -822,6 +1362,24 @@ internal static class Files
     }
 
     static readonly Dictionary<string, (long Stamp, string Era)> designEras = new(StringComparer.OrdinalIgnoreCase);
+
+    /// What's wrong with a design the game can't build properly (Blueprints.Broken), or null; looked up again when its
+    /// file changes.
+    internal static string? BrokenOf(string path)
+    {
+        var file = Absolute(path);
+        long stamp = 0;
+        try { stamp = File.GetLastWriteTimeUtc(file).Ticks; } catch (Exception) { }
+        if (broken.TryGetValue(file, out var known) && known.Stamp == stamp) return known.Why;
+        segments ??= Blueprints.Segments(Path.Combine(Application.streamingAssetsPath, "Parts"));
+        var why = Blueprints.Broken(file, segments);
+        broken[file] = (stamp, why);
+        if (why != null) Trace.Write($"designs: {Path.GetFileNameWithoutExtension(file)} is broken: {why}");
+        return why;
+    }
+
+    static readonly Dictionary<string, (long Stamp, string? Why)> broken = new(StringComparer.OrdinalIgnoreCase);
+    static HashSet<string>? segments;
 
     internal static Vector3 Vector(float[] v) => new(v[0], v[1], v[2]);
     internal static float[] Array(Vector3 v) => new[] { v.x, v.y, v.z };

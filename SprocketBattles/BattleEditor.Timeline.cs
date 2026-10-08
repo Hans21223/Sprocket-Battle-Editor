@@ -26,14 +26,14 @@ public sealed partial class BattleEditor
 
     /// The tanks with a track: those with keys, and the picked one.
     List<BattleUnit> KeyedTanks() =>
-        file.Units.Where(u => C.Tanks.Any(t => t.Unit == u.Id && t.Keys.Count > 0) || u == selected).ToList();
+        C.Replay != null ? new() : file.Units.Where(u => C.Tanks.Any(t => t.Unit == u.Id && t.Keys.Count > 0) || u == selected).ToList();
 
     void Timeline()
     {
         var c = C;
         tlHits.Clear();
         var tanks = KeyedTanks();
-        int rows = 1 + Math.Max(1, c.Cameras.Count) + tanks.Count;
+        int rows = 1 + Math.Max(1, c.Cameras.Count) + tanks.Count + (c.Replay != null ? 1 : 0);
         float height = Ruler + rows * TrackHeight + 10;
         var box = Panel(new Rect(16, Screen.height - 16 - height, Screen.width - 32, height));
         tlArea = box;
@@ -110,6 +110,14 @@ public sealed partial class BattleEditor
         y += TrackHeight;
 
         // A track for each camera: its keys.
+        if (c.Replay is { } replay)
+        {
+            GUI.Label(new Rect(box.x + 8, y, Header - 12, TrackHeight - 3), "Recorded tanks");
+            var recorded = Track(y); GUI.Box(recorded, "");
+            float a = Math.Max(XAt(0), tlX0), b = Math.Min(XAt(replay.Duration), tlX1);
+            if (b > a) GUI.Box(new Rect(a, y + 3, b - a, TrackHeight - 7), "");
+            tlHits.Add((recorded, () => Scrubbing())); y += TrackHeight;
+        }
         for (int i = 0; i < c.Cameras.Count; i++)
         {
             int index = i;
@@ -129,7 +137,7 @@ public sealed partial class BattleEditor
                 GUI.Button(diamond, picked ? "*" : "");
                 tlHits.Add((diamond, () =>
                 {
-                    this.cam = index; camKey = keyIndex; scrub = key.Time; ViewAt(scrub); Rebuild();
+                    this.cam = index; camKey = keyIndex; scrub = key.Time; ScrubCameraView(scrub); Rebuild();
                     return Retime(key.Time, v => key.Time = v);
                 }));
             }
@@ -195,7 +203,7 @@ public sealed partial class BattleEditor
     }
 
     /// Dragging the playhead: the view follows the picked camera.
-    Action<float> Scrubbing() => t => { scrub = Snap(t); ViewAt(scrub); };
+    Action<float> Scrubbing() => t => { scrub = Snap(t); ScrubCameraView(scrub); };
 
     /// Dragging a key or cut by as much as the mouse moved since it was grabbed (a click alone leaves it where it is).
     static Action<float> Retime(float start, Action<float> set)
@@ -246,6 +254,7 @@ public sealed partial class BattleEditor
 
     void AddTankKey(BattleUnit unit)
     {
+        if (C.Replay != null) return; // Recorded tank motion is immutable; replay edits only change cameras/cuts.
         var track = C.Tanks.FirstOrDefault(t => t.Unit == unit.Id);
         if (track == null) C.Tanks.Add(track = new TankTrack { Unit = unit.Id });
         var last = track.Keys.LastOrDefault(k => k.Time <= scrub);
@@ -265,7 +274,7 @@ public sealed partial class BattleEditor
     /// Delete on the Cinematic tab: the picked tank key, else the picked camera key.
     void DeleteKey()
     {
-        if (selected != null && C.Tanks.FirstOrDefault(t => t.Unit == selected.Id) is { } track && tankKey >= 0 && tankKey < track.Keys.Count)
+        if (C.Replay == null && selected != null && C.Tanks.FirstOrDefault(t => t.Unit == selected.Id) is { } track && tankKey >= 0 && tankKey < track.Keys.Count)
         { track.Keys.RemoveAt(tankKey); tankKey = -1; Rebuild(); return; }
         if (Cam is { } cam && camKey >= 0 && camKey < cam.Keys.Count) { cam.Keys.RemoveAt(camKey); camKey = -1; Rebuild(); }
     }

@@ -26,6 +26,7 @@ internal static class Puppet
     }
 
     static readonly Dictionary<IntPtr, State> puppets = new();
+    static readonly Dictionary<IntPtr, VehicleBehaviour> reserves = new();
     static readonly HashSet<IntPtr> drivers = new(), layers = new(), gunners = new();
 
     internal static IEnumerable<State> All => puppets.Values;
@@ -61,11 +62,42 @@ internal static class Puppet
 
     static CommanderAI? Commander(VehicleBehaviour tank) => tank?.OrderReciever?.TryCast<CommanderAI>();
 
+    // A battle's tanks set to keep their turret still or never fire (BattleUnit.NoTurret / NoFire): their gun layers or
+    // gunners skip their turns all battle. Force control still aims and fires them (it sets the guns itself).
+    static readonly Dictionary<IntPtr, (VehicleBehaviour Tank, bool Turret, bool Fire)> locks = new();
+
+    internal static void Lock(VehicleBehaviour tank, bool turret, bool fire) { locks[tank.Pointer] = (tank, turret, fire); Index(); }
+    internal static void Unlock(VehicleBehaviour tank) { if (locks.Remove(tank.Pointer)) Index(); }
+    internal static void Unlock() { locks.Clear(); Index(); }
+
+    // Reserves stay constructed at their native pose, but no driver or gun crew may act until arrival.
+    internal static void ReserveHold(VehicleBehaviour tank, bool waiting)
+    {
+        if (waiting) reserves[tank.Pointer] = tank;
+        else reserves.Remove(tank.Pointer);
+        Index();
+    }
+
     /// Which AI parts skip their turns: the driver if the drive is taken, gun layers if the aim is, gunners if either
-    /// the aim is or they hold fire.
+    /// the aim is or they hold fire; and the locked tanks' gun layers and gunners.
     static void Index()
     {
         drivers.Clear(); layers.Clear(); gunners.Clear();
+        foreach (var tank in reserves.Values)
+        {
+            var ai = tank == null ? null : Commander(tank);
+            if (ai == null) continue;
+            if (ai.driver != null) drivers.Add(ai.driver.Pointer);
+            if (ai.gunLayers is { } gl) for (int i = 0; i < gl.Length; i++) if (gl[i] != null) layers.Add(gl[i].Pointer);
+            if (ai.gunners is { } g) for (int i = 0; i < g.Length; i++) if (g[i] != null) gunners.Add(g[i].Pointer);
+        }
+        foreach (var (tank, turret, fire) in locks.Values)
+        {
+            var ai = tank == null ? null : Commander(tank);
+            if (ai == null) continue;
+            if (turret && ai.gunLayers is { } gl) for (int i = 0; i < gl.Length; i++) if (gl[i] != null) layers.Add(gl[i].Pointer);
+            if (fire && ai.gunners is { } g) for (int i = 0; i < g.Length; i++) if (g[i] != null) gunners.Add(g[i].Pointer);
+        }
         foreach (var s in puppets.Values)
         {
             var ai = s.Tank == null ? null : Commander(s.Tank);

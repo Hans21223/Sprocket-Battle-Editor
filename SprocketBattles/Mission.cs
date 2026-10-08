@@ -4,7 +4,7 @@ using UnityEngine.Rendering.HighDefinition;
 
 namespace SprocketBattles;
 
-/// A battle's mission while it plays: its mines and obstacles laid, its reserve tanks held off the map, and its rules
+/// A battle's mission while it plays: its mines and obstacles laid, its reserve tanks hidden at their native poses, and its rules
 /// checked four times a second ("when this happens, do that", each once). Started when the battle's tanks are placed.
 ///
 /// Conditions (Rule.When): time (Seconds into the battle), destroyed (Unit out of the fight), wipedOut (all of Team out;
@@ -32,6 +32,7 @@ internal static class Mission
     static readonly HashSet<Rule> done = new();
     static readonly Dictionary<Rule, float> holding = new();
     static readonly Dictionary<string, BattleUnit> reserve = new(); // reserve tanks not yet arrived, by id
+    static readonly Dictionary<IntPtr, HiddenReserve> hiddenReserves = new();
     static readonly List<Barrage> barrages = new();
 
     /// What the battle shows: messages (until a time), and the end banner (victory or defeat) once a rule ends it.
@@ -44,6 +45,13 @@ internal static class Mission
 
     sealed class Barrage { public Vector3 Centre; public float Radius, Power; public List<float> At = new(); }
     sealed class ATMineRef { public Sprocket.Landmines.ATMine Mine = null!; public bool Shown; public float Power; }
+    sealed class HiddenReserve
+    {
+        internal VehicleBehaviour Tank = null!;
+        internal readonly List<(Renderer Part, bool Enabled)> Renderers = new();
+        internal readonly List<(Collider Part, bool Enabled)> Colliders = new();
+        internal readonly List<(Rigidbody Part, bool Kinematic)> Bodies = new();
+    }
 
     /// The battle's tanks are placed: lay the mission out and start checking its rules.
     internal static void Start(BattleFile battle, Dictionary<string, VehicleBehaviour> byId)
@@ -67,10 +75,14 @@ internal static class Mission
     /// Everything the mission put in the world taken away (a new battle, Play again, the editor).
     internal static void Stop()
     {
+        // Leaving before the reserve rule fires must not leave surviving native tanks invisible or frozen.
+        foreach (var state in hiddenReserves.Values) RestoreReserve(state);
+        hiddenReserves.Clear();
         foreach (var o in laid) if (o != null) UnityEngine.Object.Destroy(o);
         laid.Clear(); mines.Clear(); done.Clear(); holding.Clear(); reserve.Clear(); barrages.Clear(); Messages.Clear();
         if (Banner != null) { Banner = null; Time.timeScale = timeScaleBefore > 0 ? timeScaleBefore : 1; }
         file = null;
+        tanks = new();
     }
 
     /// The end banner away, the battle going again.
@@ -79,6 +91,16 @@ internal static class Mission
         if (Banner == null) return;
         Banner = null;
         Time.timeScale = timeScaleBefore > 0 ? timeScaleBefore : 1;
+    }
+
+    /// A mode or authored rule reports its result through the same banner and pause lifecycle.
+    internal static void End(bool won, string title, string text)
+    {
+        if (Banner != null) return;
+        Banner = (title, text, won);
+        timeScaleBefore = Time.timeScale;
+        Time.timeScale = 0;
+        Trace.Write($"battle result: {title}: {text}");
     }
 
     /// Every frame.
@@ -105,6 +127,22 @@ internal static class Mission
         nextCheck = Time.time + 0.25f;
         foreach (var rule in file.Mission?.Rules ?? new())
             if (!done.Contains(rule) && Holds(rule)) { done.Add(rule); Guard.Run("mission rule", () => Do(rule)); }
+        if (Banner == null && !file.FreeForAll && !Gauntlet.IsCurrent(file) && Now >= 2.0f)
+        {
+            var activeEnemies = Team(1).Where(t => !reserve.ContainsKey(t.Id)).ToList();
+            var activeFriendlies = Team(0).Where(t => !reserve.ContainsKey(t.Id)).ToList();
+            if (activeEnemies.Count > 0 && activeFriendlies.Count > 0)
+            {
+                bool enemiesOut = activeEnemies.All(t => Out(t.Tank));
+                bool playerOut = activeFriendlies.All(t => Out(t.Tank));
+                if (enemiesOut && playerOut)
+                    End(false, "DRAW", "Both sides were eliminated.");
+                else if (enemiesOut)
+                    End(true, "VICTORY", "Every enemy vehicle was destroyed.");
+                else if (playerOut)
+                    End(false, "DEFEAT", "All friendly vehicles were lost.");
+            }
+        }
     }
 
     // ---------- conditions ----------
@@ -132,7 +170,7 @@ internal static class Mission
 
     static VehicleBehaviour? Tank(string id) => tanks.TryGetValue(id, out var t) && t != null ? t : null;
     static IEnumerable<(string Id, VehicleBehaviour? Tank)> Team(int team) => file!.Units.Where(u => u.Team == team).Select(u => (u.Id, Tank(u.Id)));
-    static bool Out(VehicleBehaviour? tank) => tank == null || (tank.Flags & (VehicleFlags.Mobile | VehicleFlags.Armed)) == 0;
+    static bool Out(VehicleBehaviour? tank) => Battle.Out(tank);
     static bool Alive(string id, VehicleBehaviour? tank) => tank != null && !reserve.ContainsKey(id) && !Out(tank);
     static Zone? Zone(string? id) => file?.Mission?.Zones.FirstOrDefault(z => z.Id == id);
     static bool In(VehicleBehaviour tank, Zone z) => (tank.Position - Files.Vector(z.Center)).Flat().magnitude <= z.Radius;
@@ -158,9 +196,7 @@ internal static class Mission
             case "message": Messages.Add((a.Text, Time.unscaledTime + 8)); break;
             case "victory":
             case "defeat":
-                Banner = (a.Do == "victory" ? "VICTORY" : "DEFEAT", a.Text, a.Do == "victory");
-                timeScaleBefore = Time.timeScale;
-                Time.timeScale = 0;
+                End(a.Do == "victory", a.Do == "victory" ? "VICTORY" : "DEFEAT", a.Text);
                 break;
             case "artillery":
                 if (zone is not { } z) break;
@@ -196,25 +232,63 @@ internal static class Mission
         Battle.SendTo(tank, Ground(spot), face.sqrMagnitude > 1 ? face.normalized : Vector3.forward);
     }
 
-    // ---------- reserves: off the map until they arrive ----------
+    // ---------- reserves: hidden at their native spawn poses until they arrive ----------
 
     static void Hide(VehicleBehaviour tank)
     {
+        if (hiddenReserves.ContainsKey(tank.Pointer)) return;
         var root = tank.transform.root;
-        root.position += Vector3.down * 1000;
-        foreach (var body in root.GetComponentsInChildren<Rigidbody>()) body.isKinematic = true;
+        var state = new HiddenReserve { Tank = tank };
+        // Read every original state before changing anything. Native tracks remain enabled and registered;
+        // moving/re-enabling their roots would invalidate the track solver's cached world-space state.
+        foreach (var part in root.GetComponentsInChildren<Renderer>(true))
+            if (part != null) state.Renderers.Add((part, part.enabled));
+        foreach (var part in root.GetComponentsInChildren<Collider>(true))
+            if (part != null) state.Colliders.Add((part, part.enabled));
+        foreach (var part in root.GetComponentsInChildren<Rigidbody>(true))
+            if (part != null) state.Bodies.Add((part, part.isKinematic));
+        hiddenReserves.Add(tank.Pointer, state);
+        try
+        {
+            foreach (var (part, _) in state.Bodies) part.isKinematic = true;
+            foreach (var (part, _) in state.Colliders) part.enabled = false;
+            foreach (var (part, _) in state.Renderers) part.enabled = false;
+            Puppet.ReserveHold(tank, true);
+        }
+        catch
+        {
+            RestoreReserve(state);
+            hiddenReserves.Remove(tank.Pointer);
+            throw;
+        }
     }
 
     internal static bool Waiting(string id) => reserve.ContainsKey(id);
 
     static void Arrive(VehicleBehaviour tank, BattleUnit unit)
     {
-        var root = tank.transform.root;
-        var at = Files.Vector(unit.Position);
-        root.SetPositionAndRotation(Ground(at) + Vector3.up * 1.2f, Quaternion.Euler(0, unit.Yaw, 0));
-        foreach (var body in root.GetComponentsInChildren<Rigidbody>()) { body.isKinematic = false; body.velocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+        if (hiddenReserves.TryGetValue(tank.Pointer, out var state))
+        {
+            RestoreReserve(state);
+            hiddenReserves.Remove(tank.Pointer);
+        }
+        // The terrain-safe native spawn (including random Free-for-All placement) remains authoritative.
+        // Restore component states only: no transform, rigidbody position, velocity or native buffer writes.
         Physics.SyncTransforms();
-        Trace.Write($"mission: {unit.Id} arrives");
+        Trace.Write($"mission: {unit.Id} arrives at its retained native pose {tank.Position}");
+    }
+
+    static void RestoreReserve(HiddenReserve state)
+    {
+        // A tank may have been destroyed during teardown. Restore every surviving component independently
+        // so one unavailable native reference cannot prevent the remaining bodies/renderers being released.
+        foreach (var (part, enabled) in state.Colliders)
+            Guard.Run("restoring reserve collider", () => { if (part != null) part.enabled = enabled; });
+        foreach (var (part, kinematic) in state.Bodies)
+            Guard.Run("restoring reserve body", () => { if (part != null) part.isKinematic = kinematic; });
+        foreach (var (part, enabled) in state.Renderers)
+            Guard.Run("restoring reserve renderer", () => { if (part != null) part.enabled = enabled; });
+        Guard.Run("releasing reserve AI", () => Puppet.ReserveHold(state.Tank, false));
     }
 
     // ---------- mines, blasts and obstacles ----------

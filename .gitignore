@@ -4,3 +4,7 @@ obj/
 *.user
 *.zip
 artifacts/
+InspectScene/
+# Converted third-party scenery is local content, not plugin source or public release content.
+Release/BepInEx/plugins/SprocketMaps/CustomMaps/
+Release/BepInEx/plugins/SprocketMaps/demo_city_night.png

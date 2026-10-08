@@ -8,8 +8,9 @@ namespace SprocketBattles;
 /// Documents\My Games\Sprocket\Battles\<name>.json, so it can be shared, and later sent to other players as it is: each
 /// tank has a stable id (orders name tanks by it) and says who drives it ("player", "ai", or "slot:N" for the Nth human
 /// player).
-public sealed class BattleFile
+public sealed partial class BattleFile
 {
+    public const int MaxFreeForAllTanks = 8;
     public int Version { get; set; } = 2;
     public string Name { get; set; } = "";
     /// A line or two about it, shown on the Battle Editor's menu.
@@ -19,6 +20,12 @@ public sealed class BattleFile
     public string Objective { get; set; } = "";
     public string Failure { get; set; } = "";
     public string Map { get; set; } = "";
+    /// Every tank is a separate contender; authored teams still identify spawn positions and player choices.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool FreeForAll { get; set; }
+    /// Null preserves placed/default map positions. Quick battle and Gauntlet opt into random spawns explicitly.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public FreeForAllSpawnSettings? FreeForAllSpawns { get; set; }
+    /// Identifies a round of the current local Gauntlet run; ordinary/shared battles have no run attached.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public GauntletBattleInfo? Gauntlet { get; set; }
 
     /// A written objective or fail condition as its lines.
     public static string[] Lines(string text) => text.Split(';').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
@@ -31,38 +38,89 @@ public sealed class BattleFile
     /// What the player may bring to the tanks marked Pick (their own designs, chosen on the game's Custom Battle screen
     /// before the battle); null: no limits.
     public PickLimits? Limits { get; set; }
+    /// Shared to be played, not edited (its maker's choice when sharing): kept out of the Editor tab and Load saved.
+    /// ponytail: a soft lock, the file is still plain JSON.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool Locked { get; set; }
 
     /// The tanks the player picks the designs of: Team 1's (the player's team) marked Pick, in the file's order.
     [JsonIgnore] public List<BattleUnit> Slots => Units.Where(u => u.Pick && u.Team == 0).ToList();
 
+    /// The number the player may bring: available Pick positions, the count limit and remaining Free-for-All places.
+    [JsonIgnore] public int PickCapacity
+    {
+        get
+        {
+            int slots = Units.Count(u => u.Pick && u.Team == 0);
+            int capacity = Limits?.MaxTanks > 0 ? Math.Min(slots, Limits.MaxTanks) : slots;
+            if (FreeForAll)
+            {
+                int fixedTanks = Units.Count(u => !u.Pick || u.Team != 0);
+                capacity = Math.Min(capacity, Math.Max(0, MaxFreeForAllTanks - fixedTanks));
+            }
+            return capacity;
+        }
+    }
+
+    // A fixed player tank is already a useful start; player-choice tanks then keep their authored AI roles.
+    bool HasFixedPlayer => Units.Any(u => u.Control == "player" && !u.Reserve && (!u.Pick || u.Team != 0));
+    const string NoPlayerStart = "This battle has only reserve player positions. Mark at least one player position to start on the map, or choose a fixed starting tank to drive.";
+
     /// What's wrong with the player's picks (each its name, cost and era), or null if they'll do.
     public string? CheckPicks(IReadOnlyList<(string Name, int Cost, string? Era)> picks)
     {
-        int slots = Slots.Count;
-        if (picks.Count == 0) return $"Pick your tanks first: this battle takes up to {slots}.";
-        if (picks.Count > slots) return $"This battle takes {slots} of your tanks; you picked {picks.Count}.";
+        int capacity = PickCapacity;
+        if (picks.Count == 0) return capacity == 0
+            ? FreeForAll && Slots.Count > 0 ? $"No room for player choices: Free-for-All allows {MaxFreeForAllTanks} tanks in total. Remove a fixed tank first."
+                : "This battle has no tanks marked for player selection."
+            : $"Pick your tanks first: this battle takes up to {capacity}.";
+        if (picks.Count > capacity) return $"This battle takes {capacity} of your tanks; you picked {picks.Count}.";
+        if (!HasFixedPlayer && !Slots.Any(u => !u.Reserve)) return NoPlayerStart;
         var l = Limits ?? new PickLimits();
+        long total = 0;
         foreach (var p in picks)
         {
+            if (p.Cost < 0) return $"{p.Name} has an invalid cost. Save the design again before picking it.";
             if (l.MaxCost > 0 && p.Cost > l.MaxCost) return $"{p.Name} costs {p.Cost:N0}: this battle takes {l.MaxCost:N0} a tank at most.";
-            if (l.Eras.Count > 0 && (p.Era == null || !l.Eras.Contains(p.Era)))
+            if (l.Eras.Count > 0 && (p.Era == null || !l.Eras.Contains(p.Era.Trim(), StringComparer.OrdinalIgnoreCase)))
                 return $"{p.Name} is {(p.Era == null ? "from no era" : "a " + p.Era + " design")}: this battle takes {PickLimits.Describe(l.Eras)}.";
+            total += p.Cost;
         }
-        int total = picks.Sum(p => p.Cost);
         if (l.Budget > 0 && total > l.Budget) return $"Your tanks cost {total:N0} together: this battle's budget is {l.Budget:N0}.";
         return null;
     }
 
     /// The battle with the player's designs in its Pick tanks, in order (keeping each tank's place, orders and part in
-    /// the mission and cinematic); Pick tanks left over are taken out.
+    /// the mission and cinematic); Pick tanks left over are taken out. An authored starting player slot is retained
+    /// when fewer tanks are chosen; without one, a non-reserve picked tank becomes the player's starting tank.
     public BattleFile WithPicks(IReadOnlyList<string> blueprints)
     {
+        if (blueprints.Count > PickCapacity)
+            throw new ArgumentException($"This battle takes at most {PickCapacity} of your tanks.", nameof(blueprints));
+        if (blueprints.Count > 0 && !HasFixedPlayer && !Slots.Any(u => !u.Reserve))
+            throw new ArgumentException(NoPlayerStart, nameof(blueprints));
         var copy = FromJson(ToJson());
         var slots = copy.Slots;
-        for (int i = 0; i < slots.Count; i++)
+        var selected = slots.Take(blueprints.Count).ToHashSet();
+        if (blueprints.Count > 0)
         {
-            if (i < blueprints.Count) { slots[i].Blueprint = blueprints[i]; slots[i].Pick = false; }
-            else copy.Remove(slots[i]);
+            if (!copy.HasFixedPlayer)
+            {
+                var driver = slots.FirstOrDefault(u => !u.Reserve && u.Control == "player") ?? slots.First(u => !u.Reserve);
+                if (!selected.Contains(driver))
+                {
+                    selected.Remove(slots[blueprints.Count - 1]);
+                    selected.Add(driver);
+                }
+                driver.Control = "player";
+            }
+            // Reserve tanks are hidden until called in. A player marker on one must not win the starting driver lookup.
+            foreach (var unit in copy.Units.Where(u => u.Reserve && u.Control == "player")) unit.Control = "ai";
+        }
+        int picked = 0;
+        foreach (var slot in slots)
+        {
+            if (selected.Contains(slot)) { slot.Blueprint = blueprints[picked++]; slot.Pick = false; }
+            else copy.Remove(slot);
         }
         return copy;
     }
@@ -76,8 +134,17 @@ public sealed class BattleFile
 
     public string ToJson() => JsonSerializer.Serialize(this, Options);
 
-    public static BattleFile FromJson(string json) =>
-        JsonSerializer.Deserialize<BattleFile>(json, Options) ?? throw new Exception("Not a battle file.");
+    public static BattleFile FromJson(string json)
+    {
+        var battle = JsonSerializer.Deserialize<BattleFile>(json, Options) ?? throw new InvalidDataException("Not a battle file.");
+        if (battle.CheckData() is { } error) throw new InvalidDataException(error);
+        if (battle.Cinema is { } cinema)
+        {
+            foreach (var camera in cinema.Cameras) camera.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+            foreach (var tank in cinema.Tanks) tank.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+        }
+        return battle;
+    }
 
     /// An id no tank in the battle has yet ("u1", "u2", ...).
     public string NewId()
@@ -89,8 +156,9 @@ public sealed class BattleFile
 
     /// The tanks of `team` in spawning order: grouped by design, first design first, in the order they were added.
     /// The game spawns a team one design at a time, so this is the order its spawn calls ask for positions in.
-    public List<List<BattleUnit>> SpawnGroups(int team) =>
-        Units.Where(u => u.Team == team).GroupBy(u => u.Blueprint).Select(g => g.ToList()).ToList();
+    public List<List<BattleUnit>> SpawnGroups(int team, Func<string, string>? resolve = null) =>
+        Units.Where(u => u.Team == team).GroupBy(u => (resolve?.Invoke(u.Blueprint) ?? u.Blueprint).Replace('/', '\\'),
+            StringComparer.OrdinalIgnoreCase).Select(g => g.ToList()).ToList();
 
     /// Takes `unit` out, and out of every other tank's orders, the mission's rules and the cinematic.
     public void Remove(BattleUnit unit)
@@ -114,17 +182,42 @@ public sealed class BattleFile
     }
 }
 
-/// The limits on the tanks a player brings: as many as the battle's Pick tanks, each costing at most MaxCost, all of them
-/// at most Budget, and only designs of these Eras. 0 or empty: no limit.
+public sealed class FreeForAllSpawnSettings
+{
+    public bool Randomize { get; set; } = true;
+    public float MinSpacing { get; set; } = 80;
+    public float MaxSpacing { get; set; } = 250;
+    public string? Check() => Randomize && (!float.IsFinite(MinSpacing) || !float.IsFinite(MaxSpacing)
+        || MinSpacing < 16 || MaxSpacing > 2000 || MaxSpacing < MinSpacing)
+        ? "Spawn spacing must be from 16 to 2,000 metres, with the maximum at least the minimum." : null;
+}
+
+public sealed class GauntletBattleInfo
+{
+    public string RunId { get; set; } = "";
+    public int Round { get; set; } = 1;
+}
+
+/// The limits on the tanks a player brings: at most MaxTanks of the battle's Pick tanks, each costing at most MaxCost,
+/// all of them at most Budget, and only designs of these Eras. 0 or empty: no extra limit.
 public sealed class PickLimits
 {
-    public int Budget { get; set; }
-    public int MaxCost { get; set; }
-    public List<string> Eras { get; set; } = new();
+    int budget, maxCost, maxTanks;
+    List<string> eras = new();
 
-    /// "any era", "Midwar", or "Earlywar to Latewar" (the eras are a run, oldest first).
+    public int Budget { get => budget; set => budget = Math.Max(0, value); }
+    public int MaxCost { get => maxCost; set => maxCost = Math.Max(0, value); }
+    /// 0: use all available Pick tanks; a positive limit never adds tanks that aren't already in the battle.
+    public int MaxTanks { get => maxTanks; set => maxTanks = Math.Max(0, value); }
+    public List<string> Eras
+    {
+        get => eras;
+        set => eras = (value ?? new()).Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// Names every allowed era; a non-contiguous selection must not imply that the eras between them are allowed.
     public static string Describe(List<string> eras) =>
-        eras.Count == 0 ? "any era" : eras.Count == 1 ? eras[0] + " designs" : $"designs from {eras[0]} to {eras[^1]}";
+        eras.Count == 0 ? "any era" : $"{string.Join(", ", eras)} designs";
 }
 
 public sealed class BattleUnit
@@ -141,7 +234,14 @@ public sealed class BattleUnit
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool AtSpawn { get; set; }
     /// The player picks this tank's design before the battle (Team 1 only); Blueprint is the battle maker's stand-in.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool Pick { get; set; }
-    /// What the AI does, in order: drive through each "move" point (the path), then go for the "attack" target.
+    /// Its AI leaves the turret and guns where they are.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool NoTurret { get; set; }
+    /// Its AI never fires.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool NoFire { get; set; }
+    /// Keep the AI's tracks stopped while allowing its turret and guns to work. A new movement order releases it.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool ForceStopped { get; set; }
+    /// What the AI does, in order: drive through each "move" point (the path), then go for the "attack" target. With no
+    /// path it holds its ground and only shoots (the game's own orders are dropped), except in a quick battle.
     public List<BattleOrder>? Orders { get; set; }
 
     /// The path: each "move" order's point, in order (the same arrays, so changing one moves the point).
@@ -153,6 +253,7 @@ public sealed class BattleUnit
     /// A point on the end of the path (before the target, which comes last).
     public void AddPoint(float[] at)
     {
+        ForceStopped = false;
         Orders ??= new();
         Orders.Insert(Orders.FindLastIndex(o => o.Type == "move") + 1, new BattleOrder { Type = "move", To = at });
     }
@@ -169,6 +270,7 @@ public sealed class BattleUnit
     /// The main target: another tank's id (null: none), and whether the tank stops to fire at it.
     public void SetTarget(string? id, string engage = "stopToFire")
     {
+        if (id != null) ForceStopped = false;
         Orders?.RemoveAll(o => o.Type == "attack");
         if (id != null) (Orders ??= new()).Add(new BattleOrder { Type = "attack", Target = id, Engage = engage });
         Tidy();
@@ -263,6 +365,7 @@ public sealed class RuleAction
 /// battle seconds from the moment the battle's tanks are placed.
 public sealed class CinemaData
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public ReplayData? Replay { get; set; }
     public List<CameraTrack> Cameras { get; set; } = new();
     public List<Cut> Cuts { get; set; } = new();
     public List<TankTrack> Tanks { get; set; } = new();
@@ -271,8 +374,8 @@ public sealed class CinemaData
     /// When it ends (the End mark on the timeline); null: at its last key.
     public float? End { get; set; }
 
-    [JsonIgnore] public float Length => End ?? Math.Max(Cameras.SelectMany(c => c.Keys).Select(k => k.Time).DefaultIfEmpty(0).Max(),
-                                                 Tanks.SelectMany(t => t.Keys).Select(k => k.Time).DefaultIfEmpty(0).Max());
+    [JsonIgnore] public float Length => End ?? Math.Max(Replay?.Duration ?? 0, Math.Max(Cameras.SelectMany(c => c.Keys).Select(k => k.Time).DefaultIfEmpty(0).Max(),
+                                                 Tanks.SelectMany(t => t.Keys).Select(k => k.Time).DefaultIfEmpty(0).Max()));
 }
 
 public sealed class CameraTrack

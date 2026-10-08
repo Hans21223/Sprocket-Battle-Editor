@@ -16,9 +16,11 @@ public static class Sharing
     static readonly Regex Link = new("\"file:///[^\"]*\"");
 
     /// The battle written as "<name> (Sprocket battle).zip" in `toDir`; the zip's path. `root`: Documents\My Games\Sprocket.
-    public static string Export(BattleFile battle, string root, string toDir)
+    /// `locked`: whoever puts it in can play it but not edit it (a locked battle shared on stays locked).
+    public static string Export(BattleFile battle, string root, string toDir, bool locked = false)
     {
         var copy = BattleFile.FromJson(battle.ToJson());
+        copy.Locked |= locked;
         Directory.CreateDirectory(toDir);
         var zipPath = Path.Combine(toDir, Clean(battle.Name) + " (Sprocket battle).zip");
         var part = zipPath + ".part";
@@ -26,18 +28,19 @@ public static class Sharing
         using (var zip = ZipFile.Open(part, ZipArchiveMode.Create))
         {
             var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // a design as saved -> its entry
+            var entryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var pictures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var unit in copy.Units)
             {
                 if (unit.Blueprint.StartsWith("game:", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!entries.TryGetValue(unit.Blueprint, out var entry))
+                var file = Path.GetFullPath(Path.IsPathRooted(unit.Blueprint) ? unit.Blueprint : Path.Combine(root, unit.Blueprint));
+                if (!entries.TryGetValue(file, out var entry))
                 {
-                    var file = Path.IsPathRooted(unit.Blueprint) ? unit.Blueprint : Path.Combine(root, unit.Blueprint);
                     if (!File.Exists(file)) throw new FileNotFoundException($"{unit.Id}'s design isn't there any more ({unit.Blueprint})");
                     var name = Path.GetFileNameWithoutExtension(file);
                     entry = $"designs/{name}.blueprint";
-                    for (int n = 2; entries.ContainsValue(entry); n++) entry = $"designs/{name} ({n}).blueprint";
-                    entries[unit.Blueprint] = entry;
+                    for (int n = 2; !entryNames.Add(entry); n++) entry = $"designs/{name} ({n}).blueprint";
+                    entries[file] = entry;
                     Write(zip, entry, Unlink(File.ReadAllText(file), root, pictures));
                 }
                 unit.Blueprint = entry;
@@ -75,6 +78,17 @@ public static class Sharing
         using var zip = ZipFile.OpenRead(zipPath);
         var battle = BattleFile.FromJson(Read(zip.GetEntry("battle.json") ?? throw new InvalidDataException("it isn't a shared battle (no battle.json in it)")));
         var full = Path.GetFullPath(root).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+        // Read every referenced design before adding any files: a broken package must not leave half an import.
+        var designs = new Dictionary<string, (string Name, string Text)>(StringComparer.Ordinal);
+        string rootLink = new Uri(full).AbsoluteUri;
+        foreach (var blueprint in battle.Units.Select(u => u.Blueprint).Distinct(StringComparer.Ordinal))
+        {
+            if (blueprint.StartsWith("game:", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!blueprint.StartsWith("designs/", StringComparison.Ordinal))
+                throw new InvalidDataException($"{blueprint} isn't an included shared design");
+            var entry = zip.GetEntry(blueprint) ?? throw new InvalidDataException($"{blueprint} is missing from it");
+            designs.Add(blueprint, (Clean(Path.GetFileNameWithoutExtension(entry.Name)), Read(entry).Replace(Token, rootLink)));
+        }
         foreach (var e in zip.Entries.Where(e => e.FullName.StartsWith("pictures/") && e.Name.Length > 0))
         {
             var to = Path.GetFullPath(Path.Combine(full, e.FullName["pictures/".Length..]));
@@ -87,8 +101,7 @@ public static class Sharing
         var vehicles = Path.Combine(faction, "Blueprints", "Vehicles");
         Directory.CreateDirectory(vehicles);
         var fdef = Path.Combine(faction, Faction + ".fdef");
-        if (!File.Exists(fdef)) File.WriteAllText(fdef, $"{{\n  \"name\": \"{Faction}\",\n  \"designPrefix\": \"\",\n  \"designCounter\": 0\n}}");
-        string rootLink = new Uri(full).AbsoluteUri;
+        if (!File.Exists(fdef)) SavedFiles.Write(fdef, $"{{\n  \"name\": \"{Faction}\",\n  \"designPrefix\": \"\",\n  \"designCounter\": 0\n}}", overwrite: false);
         int added = 0, reused = 0;
         var placed = new Dictionary<string, string>();
         foreach (var unit in battle.Units)
@@ -96,13 +109,11 @@ public static class Sharing
             if (!unit.Blueprint.StartsWith("designs/")) continue;
             if (!placed.TryGetValue(unit.Blueprint, out var saved))
             {
-                var entry = zip.GetEntry(unit.Blueprint) ?? throw new InvalidDataException($"{unit.Blueprint} is missing from it");
-                var text = Read(entry).Replace(Token, rootLink);
-                var name = Clean(Path.GetFileNameWithoutExtension(entry.Name));
+                var (name, text) = designs[unit.Blueprint];
                 var to = Path.Combine(vehicles, name + ".blueprint");
                 for (int n = 2; File.Exists(to) && File.ReadAllText(to) != text; n++) to = Path.Combine(vehicles, $"{name} ({n}).blueprint");
                 if (File.Exists(to)) reused++;
-                else { File.WriteAllText(to, text); added++; }
+                else { SavedFiles.Write(to, text, overwrite: false); added++; }
                 placed[unit.Blueprint] = saved = Path.GetRelativePath(full, to);
             }
             unit.Blueprint = saved;
@@ -113,7 +124,7 @@ public static class Sharing
         battle.Name = candidate;
         var path = pathFor(candidate);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, battle.ToJson());
+        SavedFiles.Write(path, battle.ToJson(), overwrite: false);
         return (battle, path, added, reused);
     }
 

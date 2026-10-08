@@ -2,9 +2,13 @@
   <Import Project="..\SprocketMod.props" />
   <PropertyGroup>
     <AssemblyName>SprocketMaps</AssemblyName>
-    <Version>0.3.1</Version>
+    <Version>0.4.1</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="SharpCompress" Version="0.50.4" />
+    <EmbeddedResource Include="Import/SprocketAutoMapExport.cs.txt" LogicalName="SprocketMaps.AutoMapExporter" WithCulture="false" />
     <!-- The listed maps' pictures, next to the DLL (BepInEx\plugins\SprocketMaps). -->
     <None Include="*.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

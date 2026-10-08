@@ -20,8 +20,11 @@ namespace SprocketBattles;
 internal static partial class MainMenu
 {
     const string ScreenScene = "ScenarioSelectScreen";
-    static Il2CppSystem.Threading.Tasks.Task? loading, unloading;
+    static Il2CppSystem.Threading.Tasks.Task? loading, unloading, closingLoad;
+    static bool ownsScreen, closeRequested;
+    static float closeRetryAt;
     static ScenarioSelectScreen? screen;
+    static ScrollRect? battleScroll;
     static TMP_Text? title;
     static bool screenFailed, firstFill;
     static string? shownKey;
@@ -34,7 +37,7 @@ internal static partial class MainMenu
     static bool ScreenOpen => screen != null || loading != null;
 
     /// Whether the game's screen is still on its way out (a battle waits for it).
-    internal static bool Unloading => unloading != null && !unloading.IsCompleted;
+    internal static bool Unloading => closeRequested || closingLoad != null || unloading != null;
 
     /// The game's own scene manager: the screen is loaded and unloaded through it as the game's Scenarios button does
     /// (loaded past it, the game didn't know the scene, and leaving a battle for the main menu quit the game).
@@ -55,6 +58,7 @@ internal static partial class MainMenu
         {
             if (Scenes() is not { } scenes) { Trace.Write("menu: the game's scene manager wasn't found; using the Battle Editor's own menu"); return false; }
             loading = scenes.Load(ScreenScene, new Il2CppReferenceArray<Il2CppSystem.Object>(0), SceneLoadOptions.None, Il2CppSystem.Threading.CancellationToken.None);
+            ownsScreen = loading != null;
             return loading != null;
         }
         catch (Exception ex) { Trace.Write($"menu: couldn't load the game's {ScreenScene}: {ex.Message}"); screenFailed = true; return false; }
@@ -62,11 +66,37 @@ internal static partial class MainMenu
 
     static void CloseScreen()
     {
-        if (!ScreenOpen) return;
-        bool loaded = screen != null || loading?.IsCompleted == true;
-        screen = null; title = null; loading = null; shownKey = null; lastShow = null;
+        if (!ScreenOpen && !ownsScreen) return;
+        CloseMenuTabs();
+        // Closing a loading menu cannot cancel the native work. Retain its task and unload its scene once
+        // it settles, even if the load or our UI setup fails before a ScenarioSelectScreen is found.
+        closingLoad = loading;
+        closeRequested = true; ownsScreen = false; closeRetryAt = 0;
+        screen = null; battleScroll = null; title = null; loading = null; shownKey = null; lastShow = null; factionPicker = null;
         items.Clear(); keepHover.Clear();
-        if (!loaded) return; // ponytail: closed mid-load, the game's own unloading of the main menu takes it
+        FinishClosingScreen();
+    }
+
+    // Runs even while the menu is closed. New map launches wait until this scene has actually gone.
+    static void FinishClosingScreen()
+    {
+        if (closingLoad != null)
+        {
+            if (!closingLoad.IsCompleted) return;
+            closingLoad = null;
+        }
+        if (unloading != null)
+        {
+            if (!unloading.IsCompleted) return;
+            if (unloading.IsFaulted || unloading.IsCanceled)
+                Trace.Write($"menu: {ScreenScene} unloading did not complete; checking for a remaining scene");
+            unloading = null;
+        }
+        if (!closeRequested) return;
+        var scene = SceneManager.GetSceneByName(ScreenScene);
+        if (!scene.IsValid() || !scene.isLoaded) { closeRequested = false; return; }
+        if (Time.unscaledTime < closeRetryAt) return;
+        closeRetryAt = Time.unscaledTime + 1;
         try { unloading = Scenes()?.Unload(ScreenScene, SceneLoadOptions.None); }
         catch (Exception ex) { Trace.Write($"menu: couldn't unload {ScreenScene}: {ex.Message}"); }
     }
@@ -80,7 +110,13 @@ internal static partial class MainMenu
             if (!loading.IsCompleted) return true;
             bool failed = loading.IsFaulted || loading.IsCanceled;
             loading = null;
-            if (failed || !SetUp())
+            bool ready = false;
+            if (!failed)
+            {
+                try { ready = SetUp(); }
+                catch (Exception ex) { Trace.Write($"menu: couldn't set up {ScreenScene}: {ex.Message}"); }
+            }
+            if (!ready)
             {
                 screenFailed = true;
                 CloseScreen();
@@ -91,8 +127,10 @@ internal static partial class MainMenu
         if (UnityEngine.InputSystem.Keyboard.current is { } keys && keys.escapeKey.wasPressedThisFrame)
         {
             if (typingKey != null) { StopTyping(); Fill(); } // Esc while typing: left as it was
+            else if (factionPicker != null) { factionPicker = null; Fill(); }
             else if (renamedFrame != Time.frameCount) GoBack(); // (not the Esc the name field just took)
         }
+        LayoutMenuTabs();
         return true;
     }
 
@@ -116,14 +154,50 @@ internal static partial class MainMenu
         }
         // The list grows with its lines, so the game's scroll view scrolls a long one (the game's few scenarios fit
         // its fixed height; more battles than that went off the bottom).
-        if (screen.selectContent.GetComponent<ContentSizeFitter>() == null)
-            screen.selectContent.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        battleScroll = screen.selectContent.GetComponentInParent<ScrollRect>();
+        if (battleScroll == null)
+        {
+            // Some versions of the native scenario list only have a fixed panel. Keep that panel's bounds
+            // as the viewport, and let the original content grow inside it instead of resizing the panel.
+            var content = screen.selectContent;
+            var viewport = Node("Battle Editor list viewport", content.parent, 0, 0, 0, 0);
+            viewport.anchorMin = content.anchorMin; viewport.anchorMax = content.anchorMax;
+            viewport.pivot = content.pivot; viewport.sizeDelta = content.sizeDelta;
+            viewport.anchoredPosition3D = content.anchoredPosition3D;
+            viewport.localRotation = content.localRotation; viewport.localScale = content.localScale;
+            viewport.SetSiblingIndex(content.GetSiblingIndex());
+            viewport.gameObject.AddComponent<Image>().color = Color.clear; // receives wheel/drag between rows
+            viewport.gameObject.AddComponent<RectMask2D>();
+            battleScroll = viewport.gameObject.AddComponent<ScrollRect>();
+            battleScroll.viewport = viewport;
+            battleScroll.horizontal = false;
+            battleScroll.movementType = ScrollRect.MovementType.Clamped;
+            battleScroll.scrollSensitivity = 32;
+            float height = content.rect.height;
+            content.SetParent(viewport, false);
+            content.localRotation = Quaternion.identity; content.localScale = Vector3.one;
+            content.anchorMin = new Vector2(0, 1); content.anchorMax = new Vector2(1, 1);
+            content.pivot = new Vector2(0.5f, 1);
+            content.sizeDelta = new Vector2(0, height); content.anchoredPosition = Vector2.zero;
+        }
+        battleScroll.content = screen.selectContent;
+        battleScroll.horizontal = false;
+        battleScroll.vertical = true;
+        battleScroll.enabled = true;
+        if (battleScroll.scrollSensitivity <= 0) battleScroll.scrollSensitivity = 32;
+        var fitter = screen.selectContent.GetComponent<ContentSizeFitter>() ?? screen.selectContent.gameObject.AddComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        SetUpMenuTabs();
         if (screen.returnButton != null)
         {
             screen.returnButton.onClick = new Button.ButtonClickedEvent();
             screen.returnButton.onClick.AddListener(Action(GoBack));
         }
-        for (int i = screen.selectContent.childCount - 1; i >= 0; i--) UnityEngine.Object.Destroy(screen.selectContent.GetChild(i).gameObject);
+        for (int i = screen.selectContent.childCount - 1; i >= 0; i--)
+        {
+            var item = screen.selectContent.GetChild(i).gameObject;
+            item.SetActive(false); UnityEngine.Object.Destroy(item);
+        }
         firstFill = true;
         Fill();
         Trace.Write("menu: on the game's Scenarios screen");
@@ -133,7 +207,7 @@ internal static partial class MainMenu
     /// The return arrow and Esc: from the maps back to the battles, else out.
     static void GoBack()
     {
-        if (choosingMap && battles.Count > 0) { choosingMap = false; Fill(); }
+        if (choosingMap) { choosingMap = false; Fill(); }
         else Close();
     }
 
@@ -141,8 +215,10 @@ internal static partial class MainMenu
 
     static void Fill()
     {
-        if (screen == null) return;
-        if (title != null) title.text = choosingMap ? "NEW BATTLE" : "BATTLE EDITOR";
+        if (menuSection != MenuSection.Playing || (!quickOpen && !gauntletOpen)) factionPicker = null;
+        if (screen == null) { if (canvas != null) { if (deferFallbackRebuild) rebuild = true; else Build(); } return; }
+        if (title != null) title.text = choosingMap ? "NEW BATTLE" : menuSection == MenuSection.Editor ? "BATTLE EDITOR" : "PLAY BATTLES";
+        RefreshMenuTabs();
         var wanted = new List<(string Key, string Text, Action Click, Action Hover, bool Dim)>();
         if (choosingMap)
         {
@@ -151,23 +227,12 @@ internal static partial class MainMenu
         }
         else
         {
-            wanted.Add(("new", "New battle", () => { choosingMap = true; Fill(); }, ShowNew, false));
-            wanted.Add(("quick", "Quick battle", () => { quickOpen = !quickOpen; actionsFor = -1; Fill(); ShowQuick(); }, ShowQuick, false));
-            if (quickOpen)
-            {
-                var mapNames = MapList().Select(m => m.Map).ToList();
-                wanted.Add(("quick map", "      Map: " + (quickMap < 0 || quickMap >= mapNames.Count ? "any" : mapNames[quickMap]),
-                    () => { quickMap = quickMap + 1 >= mapNames.Count ? -1 : quickMap + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
-                wanted.Add(("quick size", $"      Tanks a side: {QuickSizes[quickSize]}", () => { quickSize = (quickSize + 1) % QuickSizes.Length; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
-                wanted.Add(("quick designs", "      Designs: " + QuickPools[quickPool], () => { quickPool = (quickPool + 1) % QuickPools.Length; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
-                var eraNames = Files.EraList().Select(e => e.Name).ToList();
-                wanted.Add(("quick era", "      Era: " + (quickEra < 0 || quickEra >= eraNames.Count ? "any" : eraNames[quickEra]),
-                    () => { quickEra = quickEra + 1 >= eraNames.Count ? -1 : quickEra + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
-                wanted.Add(("quick start", "      Start", QuickBattle, ShowQuick, false));
-            }
+            if (menuSection == MenuSection.Editor)
+                wanted.Add(("new", "New battle", () => { choosingMap = true; Fill(); }, ShowNew, false));
+            else AddPlayingRows(wanted);
             wanted.Add(("import", "Import a shared battle", () =>
             {
-                importOpen = !importOpen; actionsFor = -1; quickOpen = false;
+                importOpen = !importOpen; actionsFor = -1; quickOpen = false; gauntletOpen = false; factionPicker = null;
                 sharedZips = importOpen ? Sharing.Find(new[] { Files.Shared, Files.Downloads }) : null;
                 Fill(); ShowImport();
             }, ShowImport, false));
@@ -184,6 +249,7 @@ internal static partial class MainMenu
                 int index = i;
                 var b = battles[i].Battle;
                 var path = battles[i].Path;
+                if (b.Locked && menuSection == MenuSection.Editor) continue; // shared to be played only
                 wanted.Add(("battle " + path, b.Name, () =>
                 {
                     if (typingKey == "battle " + path) return;
@@ -193,8 +259,20 @@ internal static partial class MainMenu
                     Fill(); ShowBattle(index);
                 }, () => ShowBattle(index), index == picked));
                 if (actionsFor != index) continue;
-                wanted.Add(("play", "      Play", () => Start(b, play: true), () => ShowBattle(index), false));
-                wanted.Add(("edit", "      Edit", () => Start(b, play: false), () => ShowBattle(index), false));
+                if (menuSection == MenuSection.Playing)
+                {
+                    wanted.Add(("choose tanks", "      Choose tanks & play", () => ChooseTanksAndPlay(b), () => ShowBattle(index), false));
+                    wanted.Add(("play authored", "      Play with battle tanks", () => PlayAuthoredTanks(b), () => ShowBattle(index), false));
+                    continue;
+                }
+                wanted.Add(("edit", "      Edit battle", () => Start(b, play: false), () => ShowBattle(index), false));
+                wanted.Add(("battle mode", "      Mode: " + (b.FreeForAll ? "Free for all" : "Team battle"), () =>
+                {
+                    b.FreeForAll = !b.FreeForAll;
+                    Save(path, b); shownKey = null; Fill(); ShowBattle(index);
+                }, () => ShowBattle(index), false));
+                AddSpawnSettings(wanted, "battle spawn", b.FreeForAllSpawns ??= new FreeForAllSpawnSettings(),
+                    () => { Save(path, b); shownKey = null; Fill(); ShowBattle(index); }, () => ShowBattle(index));
                 wanted.Add(("rename", "      Rename", () => StartTyping("battle " + path, b.Name, v =>
                 {
                     if (v.Trim().Length > 0 && v.Trim() != b.Name) Rename(path, b, v); else Fill();
@@ -212,7 +290,8 @@ internal static partial class MainMenu
                 wanted.Add(("clouds", $"      Clouds: {b.Clouds}", () => { b.Clouds = Next(CloudNames, b.Clouds); Save(path, b); Fill(); }, () => ShowBattle(index), false));
                 wanted.Add(("fog", $"      Fog: {b.Fog}", () => { b.Fog = Next(FogNames, b.Fog); Save(path, b); Fill(); }, () => ShowBattle(index), false));
                 wanted.Add(("duplicate", "      Duplicate", () => Duplicate(b), () => ShowBattle(index), false));
-                wanted.Add(("share", "      Share", () => Share(b), () => ShowBattle(index), false));
+                wanted.Add(("share", "      Share", () => Share(b, locked: false), () => ShowBattle(index), false));
+                wanted.Add(("share locked", "      Share locked", () => Share(b, locked: true), () => ShowBattle(index), false));
                 wanted.Add(("delete", deleteArmed ? "      Sure? Delete" : "      Delete", () =>
                 {
                     if (!deleteArmed) { deleteArmed = true; Fill(); return; }
@@ -227,7 +306,7 @@ internal static partial class MainMenu
         var keys = wanted.Select(w => w.Key).ToHashSet();
         foreach (var gone in items.Keys.Where(k => !keys.Contains(k)).ToList())
         {
-            if (items[gone] != null) UnityEngine.Object.Destroy(items[gone]);
+            if (items[gone] != null) { items[gone].SetActive(false); UnityEngine.Object.Destroy(items[gone]); }
             items.Remove(gone);
         }
         keep.Clear(); keepHover.Clear();
@@ -258,9 +337,32 @@ internal static partial class MainMenu
             keepHover.Add(hover);
             enter.callback.AddListener(hover);
             trigger.triggers.Add(enter);
+            // EventTrigger handles scroll/drag even with no matching entry, blocking the parent's ScrollRect.
+            // Keep the hover preview, and explicitly pass these gestures to the list's scroll view.
+            if (battleScroll != null)
+            {
+                Forward(EventTriggerType.Scroll, battleScroll.OnScroll);
+                if (typingKey != w.Key) // dragging an input row selects text instead
+                {
+                    Forward(EventTriggerType.InitializePotentialDrag, battleScroll.OnInitializePotentialDrag);
+                    Forward(EventTriggerType.BeginDrag, battleScroll.OnBeginDrag);
+                    Forward(EventTriggerType.Drag, battleScroll.OnDrag);
+                    Forward(EventTriggerType.EndDrag, battleScroll.OnEndDrag);
+                }
+            }
+            void Forward(EventTriggerType type, Action<PointerEventData> handle)
+            {
+                var entry = new EventTrigger.Entry { eventID = type };
+                var callback = DelegateSupport.ConvertDelegate<UnityAction<BaseEventData>>(new Action<BaseEventData>(data =>
+                    Guard.Run("Battle Editor list scroll", () => handle(data.Cast<PointerEventData>()))))!;
+                keepHover.Add(callback);
+                entry.callback.AddListener(callback);
+                trigger.triggers.Add(entry);
+            }
         }
         firstFill = false;
         try { screen.Relayout(); } catch (Exception) { }
+        LayoutRebuilder.ForceRebuildLayoutImmediate(screen.selectContent);
         if (shownKey == null)
         {
             if (choosingMap) { if (MapList().FirstOrDefault() is { Map: not null } first) ShowMap(first); }
@@ -282,51 +384,250 @@ internal static partial class MainMenu
         return item;
     }
 
+    /// Shared Playing rows for both the native scenario screen and the fallback scrolling menu.
+    static void AddPlayingRows(List<(string Key, string Text, Action Click, Action Hover, bool Dim)> wanted)
+    {
+        wanted.Add(("quick", "Quick battle", () => { quickOpen = !quickOpen; gauntletOpen = false; importOpen = false; factionPicker = null; actionsFor = -1; Fill(); ShowQuick(); }, ShowQuick, false));
+        if (quickOpen && menuSection == MenuSection.Playing)
+        {
+            wanted.Add(("quick mode", "      Mode: " + (quickFreeForAll ? "Free for all" : "Team battle"),
+                () => { quickFreeForAll = !quickFreeForAll; if (quickFreeForAll) quickSize = Math.Min(quickSize, 3); shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+            var mapNames = MapList().Select(m => m.Map).ToList();
+            wanted.Add(("quick map", "      Map: " + (quickMap < 0 || quickMap >= mapNames.Count ? "any" : mapNames[quickMap]),
+                () => { quickMap = quickMap + 1 >= mapNames.Count ? -1 : quickMap + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+            wanted.Add(("quick size", quickFreeForAll ? $"      Total tanks: {2 * QuickSizes[quickSize]}" : $"      Tanks a side: {QuickSizes[quickSize]}", () => { quickSize = (quickSize + 1) % (quickFreeForAll ? 4 : QuickSizes.Length); shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+            AddFactionSetting(wanted, "quick player faction", "Player faction", quickPlayerPool, quickPlayerFaction,
+                (pool, faction) => { quickPlayerPool = pool; quickPlayerFaction = faction; }, RefreshQuick, ShowQuick);
+            AddFactionSetting(wanted, "quick enemy faction", "Enemy faction", quickEnemyPool, quickEnemyFaction,
+                (pool, faction) => { quickEnemyPool = pool; quickEnemyFaction = faction; }, RefreshQuick, ShowQuick);
+            var eraNames = Files.EraList().Select(e => e.Name).ToList();
+            wanted.Add(("quick era", "      Era: " + (quickEra < 0 || quickEra >= eraNames.Count ? "any" : eraNames[quickEra]),
+                () => { quickEra = quickEra + 1 >= eraNames.Count ? -1 : quickEra + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+            AddSpawnSettings(wanted, "quick spawn", quickSpawns, RefreshQuick, ShowQuick);
+            wanted.Add(("quick start", "      Start", QuickBattle, ShowQuick, false));
+        }
+        if (menuSection == MenuSection.Playing)
+            wanted.Add(("gauntlet", "Gauntlet", () => { gauntletOpen = !gauntletOpen; quickOpen = false; importOpen = false; factionPicker = null; actionsFor = -1; Fill(); ShowGauntlet(); }, ShowGauntlet, false));
+        if (gauntletOpen && menuSection == MenuSection.Playing)
+        {
+            bool hasSave = Gauntlet.TryGetSavedRun(out var save);
+            if (hasSave && save != null)
+                wanted.Add(("gauntlet resume", $"      Resume run (round {save.Round}/{save.Settings.Rounds})", Gauntlet.Resume, ShowGauntlet, false));
+            var mapNames = MapList().Select(m => m.Map).ToList();
+            wanted.Add(("gauntlet map", "      Map: " + (gauntletMap < 0 || gauntletMap >= mapNames.Count ? "random" : mapNames[gauntletMap]),
+                () => { gauntletMap = gauntletMap + 1 >= mapNames.Count ? -1 : gauntletMap + 1; RefreshGauntlet(); }, ShowGauntlet, false));
+            AddNumberSetting(wanted, "gauntlet budget", "Starting funds", gauntletBudget, 1000, 10000000,
+                v => gauntletBudget = v, RefreshGauntlet, ShowGauntlet);
+            AddNumberSetting(wanted, "gauntlet rounds", "Rounds", gauntletRounds, 2, 30,
+                v => gauntletRounds = v, RefreshGauntlet, ShowGauntlet);
+            AddFactionSetting(wanted, "gauntlet enemy faction", "Enemy faction", gauntletPool, gauntletEnemyFaction,
+                (pool, faction) => { gauntletPool = pool; gauntletEnemyFaction = faction; }, RefreshGauntlet, ShowGauntlet);
+            AddSpawnSettings(wanted, "gauntlet spawn", gauntletSpawns, RefreshGauntlet, ShowGauntlet);
+            wanted.Add(("gauntlet start", hasSave ? "      Start new run" : "      Choose tank & start", StartGauntlet, ShowGauntlet, false));
+        }
+    }
+
     // ---------- quick battle ----------
 
     // A battle with nothing to set up: so many random designs a side on a map (or any), started where the game spawns
-    // them, and not saved (F9 in it opens the editor as on any custom battle).
-    static bool quickOpen;
-    static int quickMap = -1, quickSize = 2, quickPool;
+    // them, and not saved. Playing controls stay separate from the map editor.
+    static bool quickOpen, quickFreeForAll;
+    static readonly FreeForAllSpawnSettings quickSpawns = new();
+    static int quickMap = -1, quickSize = 2, quickPlayerPool, quickEnemyPool;
+    static string? quickPlayerFaction, quickEnemyFaction;
     static readonly int[] QuickSizes = { 1, 2, 3, 4, 6, 8 };
     static readonly string[] QuickPools = { "yours", "the game's", "yours and the game's" };
     static readonly System.Random dice = new();
 
     /// The designs a quick battle picks from: yours (not autosaves), the game's tanks (not its AT guns or targets), or both.
-    static List<(string Path, string Name)> QuickDesigns() => Files.Designs().Where(d =>
+    /// Never a broken one (Blueprints: tracks the game can't build, which crashed or stalled battles).
+    static List<(string Path, string Name)> QuickDesigns(int team) => team == 0
+        ? RandomDesigns(quickPlayerPool, QuickEra(), quickPlayerFaction)
+        : RandomDesigns(quickEnemyPool, QuickEra(), quickEnemyFaction);
+
+    static List<(string Path, string Name)> RandomDesigns(int pool, string? era, string? faction = null) => Files.Designs().Where(d =>
     {
         bool game = d.Path.StartsWith("game:", StringComparison.OrdinalIgnoreCase);
         if (game ? Files.IsATGun(d.Path) || d.Name.Contains("Target") : d.Name.StartsWith("Autosave")) return false;
-        if (QuickEra() is { } era && Files.EraOf(d.Path) != era) return false;
-        return quickPool == 2 || (quickPool == 0) != game;
+        if (era != null && Files.EraOf(d.Path) != era) return false;
+        return DesignPoolRules.Matches(pool, game, Files.FactionOf(d.Path), faction) && Files.BrokenOf(d.Path) == null;
     }).ToList();
 
     static int quickEra = -1; // the era quick battle tanks are picked from (-1: any)
     static string? QuickEra() => Files.EraList().ElementAtOrDefault(quickEra)?.Name;
+    static void RefreshQuick() { shownKey = null; Fill(); ShowQuick(); }
 
     static void ShowQuick()
     {
         var maps = MapList();
         bool chosen = quickMap >= 0 && quickMap < maps.Count;
-        Show($"quick {quickMap} {quickSize} {quickPool} {quickEra}", "Quick battle",
-             $"{QuickSizes[quickSize]} vs {QuickSizes[quickSize]} tanks, each picked at random from {QuickDesigns().Count} designs ({QuickPools[quickPool]}{(QuickEra() is { } e ? ", " + e : "")}), " +
-             $"on {(chosen ? maps[quickMap].Map : "a map picked at random")}. They start where the game spawns them, and nothing is saved.",
-             new[] { "Destroy every enemy tank" }, new[] { "Lose all vehicles" }, new[] { "QUICK BATTLE" },
-             chosen ? SplashPath(maps[quickMap].Map, scenario: true) : maps.Count > 0 ? maps[0].ScenarioSplash : "");
+        Show($"quick {quickMap} {quickSize} {quickPlayerPool} {quickPlayerFaction} {quickEnemyPool} {quickEnemyFaction} {quickEra} {quickFreeForAll} {quickSpawns.Randomize} {quickSpawns.MinSpacing} {quickSpawns.MaxSpacing}", "Quick battle",
+             (quickFreeForAll ? $"Free for all: {2 * QuickSizes[quickSize]} tanks, every tank fights every other tank (up to 8 total). " : $"Team battle: {QuickSizes[quickSize]} vs {QuickSizes[quickSize]} tanks. ") +
+             $"Player designs: {QuickDesigns(0).Count} from {FactionSelectionLabel(quickPlayerPool, quickPlayerFaction)}. " +
+             $"Enemy designs: {QuickDesigns(1).Count} from {FactionSelectionLabel(quickEnemyPool, quickEnemyFaction)}. " +
+             (QuickEra() is { } e ? $"Era: {e}. " : "") +
+              $"Designs are picked at random on {(chosen ? maps[quickMap].Map : "a map picked at random")}. The map may reduce the tank count. " +
+              SpawnDescription(quickSpawns) + " Nothing is saved.",
+              new[] { "Destroy every enemy tank" }, new[] { "Lose all vehicles" }, new[] { "QUICK BATTLE" },
+              chosen ? SplashPath(maps[quickMap].Map, scenario: true) : maps.Count > 0 ? maps[0].ScenarioSplash : "");
     }
 
     static void QuickBattle()
     {
-        var maps = MapList(); var designs = QuickDesigns();
-        if (maps.Count == 0 || designs.Count == 0) { Tell(designs.Count == 0 ? "No designs to pick from: try the other Designs choice." : "No maps to fight on."); return; }
+        var maps = MapList();
+        if (maps.Count == 0) { Tell("No maps to fight on."); return; }
+        var designs = new[] { QuickDesigns(0), QuickDesigns(1) };
+        for (int team = 0; team < designs.Length; team++)
+            if (designs[team].Count == 0)
+            {
+                Tell($"No usable {(team == 0 ? "player" : "enemy")} tanks match {(team == 0 ? FactionSelectionLabel(quickPlayerPool, quickPlayerFaction) : FactionSelectionLabel(quickEnemyPool, quickEnemyFaction))} and the selected era. Choose another faction or era.");
+                return;
+            }
         var map = quickMap >= 0 && quickMap < maps.Count ? maps[quickMap] : maps[dice.Next(maps.Count)];
-        int size = map.Spawns > 0 ? Math.Min(QuickSizes[quickSize], map.Spawns) : QuickSizes[quickSize];
-        var b = new BattleFile { Name = "Quick battle", Map = map.Map };
+        int enemyCapacity = EnemySpawnCapacity(map.Map);
+        if (map.Spawns < 1 || enemyCapacity < 1) { Tell("This map has no known spawn positions for both teams. Choose another map."); return; }
+        int size = Math.Min(QuickSizes[quickSize], Math.Min(map.Spawns, enemyCapacity));
+        if (quickFreeForAll) size = Math.Min(size, 4);
+        var b = new BattleFile
+        {
+            Name = quickFreeForAll ? "Quick free for all" : "Quick battle", Map = map.Map, FreeForAll = quickFreeForAll,
+            FreeForAllSpawns = quickSpawns.Randomize ? new FreeForAllSpawnSettings
+            { Randomize = quickSpawns.Randomize, MinSpacing = quickSpawns.MinSpacing, MaxSpacing = quickSpawns.MaxSpacing } : null,
+        };
         for (int team = 0; team < 2; team++)
             for (int i = 0; i < size; i++)
-                b.Units.Add(new BattleUnit { Id = b.NewId(), Team = team, Blueprint = designs[dice.Next(designs.Count)].Path, AtSpawn = true });
-        Trace.Write($"menu: quick battle on {map.Map}: {string.Join(", ", b.Units.Select(u => $"{u.Id} {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}"))}");
+                b.Units.Add(new BattleUnit { Id = b.NewId(), Team = team, Blueprint = designs[team][dice.Next(designs[team].Count)].Path, AtSpawn = true });
+        Trace.Write($"menu: quick battle on {map.Map}, player faction={FactionSelectionLabel(quickPlayerPool, quickPlayerFaction)}, enemy faction={FactionSelectionLabel(quickEnemyPool, quickEnemyFaction)}, era={QuickEra() ?? "any"}: {string.Join(", ", b.Units.Select(u => $"{u.Id} {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}"))}");
         Start(b, play: true);
+    }
+
+    // ---------- gauntlet ----------
+
+    static bool gauntletOpen;
+    static int gauntletMap = -1, gauntletBudget = 100000, gauntletRounds = 10, gauntletPool = 1;
+    static string? gauntletEnemyFaction;
+    static readonly FreeForAllSpawnSettings gauntletSpawns = new() { Randomize = false, MinSpacing = 80, MaxSpacing = 200 };
+    static void RefreshGauntlet() { shownKey = null; Fill(); ShowGauntlet(); }
+
+    static void ShowGauntlet()
+    {
+        var maps = MapList();
+        bool chosen = gauntletMap >= 0 && gauntletMap < maps.Count;
+        bool hasSave = Gauntlet.TryGetSavedRun(out var save);
+        int available = RandomDesigns(gauntletPool, null, gauntletEnemyFaction).Count;
+        string desc = hasSave && save != null
+            ? $"Saved run in progress at round {save.Round} of {save.Settings.Rounds} ({save.Credits:N0} funds). Resume your run or start a new campaign.\n" +
+              $"Enemies progress chronologically across eras. Pay era fees to advance your tank."
+            : $"Start with {gauntletBudget:N0} funds. Fight through {gauntletRounds} rounds against enemy waves that progress chronologically across eras.\n" +
+              $"Repair and refit between rounds with earned rewards. Advance your tank's era for a fee." +
+              (gauntletSpawns.Randomize ? $"\n{SpawnDescription(gauntletSpawns)}" : "");
+        Show($"gauntlet {gauntletMap} {gauntletBudget} {gauntletRounds} {gauntletPool} {gauntletEnemyFaction} {hasSave} {gauntletSpawns.Randomize} {gauntletSpawns.MinSpacing} {gauntletSpawns.MaxSpacing}", "Gauntlet",
+             desc,
+             new[] { $"Complete {gauntletRounds} rounds" }, new[] { "Lose your tank" }, new[] { "GAUNTLET" },
+             chosen ? SplashPath(maps[gauntletMap].Map, scenario: true) : maps.FirstOrDefault().ScenarioSplash ?? "");
+    }
+
+    static void StartGauntlet()
+    {
+        var maps = MapList();
+        if (maps.Count == 0) { Tell("No maps are available for Gauntlet."); return; }
+        if (RandomDesigns(gauntletPool, null, gauntletEnemyFaction).Count == 0)
+        { Tell($"No usable enemy tanks match {FactionSelectionLabel(gauntletPool, gauntletEnemyFaction)}. Choose another enemy faction."); return; }
+        var map = gauntletMap >= 0 && gauntletMap < maps.Count ? maps[gauntletMap] : maps[dice.Next(maps.Count)];
+        Trace.Write($"menu: Gauntlet on {map.Map}, enemy faction={FactionSelectionLabel(gauntletPool, gauntletEnemyFaction)}");
+        Gauntlet.Start(new GauntletSettings
+        {
+            Budget = gauntletBudget, Rounds = gauntletRounds, Map = map.Map, Pool = QuickPools[gauntletPool], EnemyFaction = gauntletEnemyFaction,
+            Spawns = gauntletSpawns.Randomize ? new FreeForAllSpawnSettings { Randomize = true, MinSpacing = gauntletSpawns.MinSpacing, MaxSpacing = gauntletSpawns.MaxSpacing } : null
+        });
+    }
+
+    // ---------- faction choices ----------
+
+    static string? factionPicker;
+
+    static string FactionSelectionLabel(int pool, string? faction) => !string.IsNullOrEmpty(faction)
+        ? (new[] { "All your factions", "Base game", "All factions" }.Contains(faction, StringComparer.OrdinalIgnoreCase)
+            ? faction + " (your faction)" : faction) : pool switch
+    {
+        0 => "All your factions",
+        1 => "Base game",
+        2 => "All factions",
+        _ => "Unknown faction selection",
+    };
+
+    static IEnumerable<string> UserFactions() => Files.Designs()
+        .Where(d => !d.Path.StartsWith("game:", StringComparison.OrdinalIgnoreCase))
+        .Select(d => Files.FactionOf(d.Path))
+        .Where(f => !string.IsNullOrWhiteSpace(f))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
+
+    static void AddFactionSetting(List<(string Key, string Text, Action Click, Action Hover, bool Dim)> wanted,
+        string key, string label, int pool, string? faction, Action<int, string?> set, Action changed, Action hover)
+    {
+        wanted.Add((key, $"      {label}: {FactionSelectionLabel(pool, faction)}", () =>
+        {
+            factionPicker = factionPicker == key ? null : key;
+            Fill(); hover();
+        }, hover, false));
+        if (factionPicker != key) return;
+        AddChoice(0, null, "All your factions");
+        AddChoice(1, null, "Base game");
+        AddChoice(2, null, "All factions");
+        foreach (var name in UserFactions()) AddChoice(0, name, FactionSelectionLabel(0, name));
+
+        void AddChoice(int choicePool, string? choiceFaction, string text)
+        {
+            bool selected = choicePool == pool && string.Equals(choiceFaction, faction, StringComparison.OrdinalIgnoreCase);
+            wanted.Add(($"{key} choice {choicePool} {choiceFaction}", "          " + (selected ? "> " : "") + text, () =>
+            {
+                set(choicePool, choiceFaction);
+                factionPicker = null;
+                Trace.Write($"menu: {label.ToLowerInvariant()} selected {text}");
+                changed();
+            }, hover, selected));
+        }
+    }
+
+    // ---------- free-for-all placement ----------
+
+    static string SpawnDescription(FreeForAllSpawnSettings settings) => settings.Randomize
+        ? $"Tanks start at random points, with {settings.MinSpacing:0}–{settings.MaxSpacing:0} m to their nearest opponent."
+        : "Tanks use the battle's saved placement or the map's normal spawn points.";
+
+    static void AddSpawnSettings(List<(string Key, string Text, Action Click, Action Hover, bool Dim)> wanted,
+        string key, FreeForAllSpawnSettings settings, Action changed, Action hover)
+    {
+        wanted.Add((key + " random", "      Random spawn points: " + (settings.Randomize ? "on" : "off"),
+            () => { settings.Randomize = !settings.Randomize; changed(); }, hover, false));
+        if (!settings.Randomize) return;
+        AddNumberSetting(wanted, key + " minimum", "Minimum spacing (m)", (int)settings.MinSpacing, 16, 2000, v =>
+        {
+            settings.MinSpacing = v;
+            if (settings.MaxSpacing < v) settings.MaxSpacing = v;
+        }, changed, hover);
+        AddNumberSetting(wanted, key + " maximum", "Maximum spacing (m)", (int)settings.MaxSpacing, 16, 2000, v =>
+        {
+            settings.MaxSpacing = v;
+            if (settings.MinSpacing > v) settings.MinSpacing = v;
+        }, changed, hover);
+    }
+
+    static void AddNumberSetting(List<(string Key, string Text, Action Click, Action Hover, bool Dim)> wanted,
+        string key, string label, int value, int minimum, int maximum, Action<int> set, Action changed, Action hover)
+    {
+        wanted.Add((key, $"      {label}: {value:N0}", () =>
+            StartTyping(key, value.ToString(System.Globalization.CultureInfo.InvariantCulture), input =>
+            {
+                if (!int.TryParse(input.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int number)
+                    || number < minimum || number > maximum)
+                {
+                    Tell($"{label}: enter a whole number from {minimum:N0} to {maximum:N0}.");
+                    Fill(); hover(); return;
+                }
+                set(number); changed();
+            }), hover, false));
     }
 
     // ---------- the dropdown's settings ----------
@@ -356,6 +657,15 @@ internal static partial class MainMenu
         Fill();
     }
 
+    /// Shared commit for native and fallback input rows. StopTyping clears state before invoking the setting callback.
+    static void CompleteTyping(string key, string value)
+    {
+        if (typingKey != key) return;
+        var done = typingDone;
+        StopTyping();
+        done?.Invoke(value);
+    }
+
     /// The line typed over in place (the game's input field on the game's label): Enter or clicking away keeps it,
     /// Esc leaves it as it was.
     static void TypeInto(GameObject item)
@@ -364,7 +674,6 @@ internal static partial class MainMenu
         var label = item.GetComponentInChildren<TMP_Text>();
         if (label == null) return;
         string key = typingKey!;
-        var done = typingDone;
         label.alpha = 1;
         // An object takes one clickable part: the line's button goes (the line is made again when typing ends).
         if (item.GetComponent<Button>() is { } button) UnityEngine.Object.DestroyImmediate(button);
@@ -376,9 +685,7 @@ internal static partial class MainMenu
         field.text = typingStart;
         var ended = DelegateSupport.ConvertDelegate<UnityAction<string>>(new Action<string>(v => Guard.Run("Battle Editor menu", () =>
         {
-            if (typingKey != key) return;
-            StopTyping();
-            done?.Invoke(v);
+            CompleteTyping(key, v);
         })))!;
         keepText.Add(ended);
         field.onEndEdit.AddListener(ended);
@@ -390,12 +697,13 @@ internal static partial class MainMenu
     static void StopTyping()
     {
         if (typingKey == null) return;
-        if (items.TryGetValue(typingKey, out var item))
+        string key = typingKey;
+        typingKey = null; typingDone = null; // deactivation can raise onEndEdit; the old callback must stop here
+        if (items.TryGetValue(key, out var item))
         {
-            if (item != null) UnityEngine.Object.Destroy(item);
-            items.Remove(typingKey);
+            if (item != null) { item.SetActive(false); UnityEngine.Object.Destroy(item); }
+            items.Remove(key);
         }
-        typingKey = null; typingDone = null;
         renamedFrame = Time.frameCount;
     }
 
@@ -416,7 +724,8 @@ internal static partial class MainMenu
         int blue = b.Units.Count(u => u.Team == 0), red = b.Units.Count(u => u.Team == 1), reserves = b.Units.Count(u => u.Reserve);
         var parts = new List<string>();
         if (b.Description.Length > 0) parts.Add(b.Description);
-        parts.Add($"{blue} vs {red} tanks on {b.Map}.");
+        parts.Add(b.FreeForAll ? $"Free for all: {b.Units.Count} tanks on {b.Map}; every tank fights every other tank." : $"{blue} vs {red} tanks on {b.Map}.");
+        if (b.FreeForAll) parts.Add(SpawnDescription(b.FreeForAllSpawns ?? new FreeForAllSpawnSettings()));
         if (reserves > 0) parts.Add($"{reserves} held in reserve.");
         if (b.Slots.Count is var slots and > 0)
         {
@@ -425,11 +734,12 @@ internal static partial class MainMenu
             if (l.Budget > 0) limits.Add($"{l.Budget:N0} in all");
             if (l.MaxCost > 0) limits.Add($"{l.MaxCost:N0} a tank at most");
             if (l.Eras.Count > 0) limits.Add(PickLimits.Describe(l.Eras));
-            parts.Add($"You bring up to {slots} of your own tanks{(limits.Count > 0 ? ": " + string.Join(", ", limits) : "")}.");
+            parts.Add($"You bring up to {b.PickCapacity} of your own tanks{(limits.Count > 0 ? ": " + string.Join(", ", limits) : "")}.");
         }
         if (m != null && m.Rules.Count > 0) parts.Add($"{m.Rules.Count} mission rules.");
         if (m != null && m.Mines.Count > 0) parts.Add($"{m.Mines.Count} mines.");
         if (b.Cinema?.Cameras.Count > 0) parts.Add($"A {b.Cinema.Length:0} s cinematic plays as it starts.");
+        if (b.Locked) parts.Add("Shared locked by its maker: it can be played, not edited.");
         var rules = m?.Rules ?? new();
         var wins = b.Objective.Length > 0 ? BattleFile.Lines(b.Objective) : rules.Where(r => r.Then.Do == "victory").Select(r => Condition(r, m!)).ToArray();
         var losses = b.Failure.Length > 0 ? BattleFile.Lines(b.Failure) : rules.Where(r => r.Then.Do == "defeat").Select(r => Condition(r, m!)).ToArray();

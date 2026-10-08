@@ -25,6 +25,7 @@ public sealed partial class BattleEditor
 
     void ClearMarks()
     {
+        cameraWidgets.Clear();
         foreach (var o in marks) Drop(o);
         marks.Clear();
         foreach (var key in pickable.Where(p => p.Value.Part is Part.Zone or Part.Mine or Part.Obstacle or Part.CamKey).Select(p => p.Key).ToList()) pickable.Remove(key);
@@ -210,7 +211,8 @@ public sealed partial class BattleEditor
     void MissionPanels()
     {
         var m = M;
-        var box = Panel(new Rect(16, 56, 480, 17 * Row + 2 * Pad));
+        float top = 56 + Row + 2 * Pad + 8;
+        var box = Panel(new Rect(16, top, 480, Math.Min(17 * Row + 2 * Pad, Screen.height - top - 16)));
         float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
         Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
         GUI.Label(Line(0, w), $"Mission: {m.Rules.Count} rules, {m.Zones.Count} zones, {m.Mines.Count} mines, {m.Obstacles.Count} obstacles");
@@ -284,7 +286,8 @@ public sealed partial class BattleEditor
         // The zones, to fly to.
         GUI.Label(Line(0, w), "Zones (click to fly there):");
         y += Row;
-        for (int i = 0; i < Math.Min(m.Zones.Count, 5); i++)
+        int zoneRows = Math.Max(0, (int)((box.yMax - Pad - 2 * Row - y) / Row));
+        for (int i = 0; i < Math.Min(m.Zones.Count, Math.Min(5, zoneRows)); i++)
         {
             var z = m.Zones[i];
             Button(Line(0, w), $"{z.Id}  {Short(z.Name, 40)}  ({z.Radius:0} m)", () => { missionPick = z; FlyTo(Files.Vector(z.Center), z.Radius * 3); Rebuild(); });
@@ -423,17 +426,21 @@ public sealed partial class BattleEditor
         GUI.Box(box, ""); // twice, darker: GUI.color (for a tint) is stripped in this build
         GUI.Box(new Rect(box.x + 20, box.y + 20, box.width - 40, 60), banner.Won ? $"\n***   {banner.Title}   ***" : $"\n{banner.Title}");
         GUI.Label(new Rect(box.x + 24, box.y + 92, box.width - 48, 40), banner.Text);
-        float b = (box.width - 40 - 8) / 3;
-        Button(new Rect(box.x + 20, box.y + 140, b, 30), "Keep playing", () => Mission.Dismiss());
-        Button(new Rect(box.x + 24 + b, box.y + 140, b, 30), "Play again", () =>
+        float b = (box.width - 40 - 18) / 4;
+        if (Gauntlet.IsCurrent(Battle.Playing))
+        {
+            if (Gauntlet.CanRefit)
+                Button(new Rect(box.x + 20, box.y + 140, 240, 30), "Repair & refit", Gauntlet.Refit);
+            Button(new Rect(box.x + 280, box.y + 140, 260, 30), "End run · Main menu", Gauntlet.EndRun);
+            return;
+        }
+        Button(new Rect(box.x + 20, box.y + 140, b, 30), "Edit battle", SwitchToEditMode);
+        Button(new Rect(box.x + 26 + b, box.y + 140, b, 30), "Play again", () =>
         {
             Mission.Dismiss();
             if (Battle.Mode is { } mode && Battle.Playing is { } again) Say(Battle.Play(mode, again) ?? "Playing again.");
         });
-        Button(new Rect(box.x + 28 + 2 * b, box.y + 140, b, 30), "Edit (F9)", () =>
-        {
-            Mission.Dismiss();
-            if (Battle.Mode is { } mode) Enter(mode);
-        });
+        Button(new Rect(box.x + 32 + 2 * b, box.y + 140, b, 30), "Keep playing", () => Mission.Dismiss());
+        Button(new Rect(box.x + 38 + 3 * b, box.y + 140, b, 30), "Main menu", () => ReturnToMainMenu());
     }
 }

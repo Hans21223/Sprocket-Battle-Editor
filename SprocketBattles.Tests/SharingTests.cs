@@ -47,6 +47,12 @@ static class SharingTests
             var again = Sharing.Import(zipPath, theirs, TheirPath);
             Check(again.Added == 0 && again.Reused == 1 && again.Battle.Name == "Duel 2", "put in twice: the design reused, the battle named apart");
             Check(Sharing.Find(new[] { Path.Combine(mine, "Battles", "Shared"), Path.Combine(home, "nowhere") }).Count == 1, "found where it was shared");
+            Check(!again.Battle.Locked, "shared plainly: editable");
+
+            var lockedZip = Sharing.Export(duel, mine, Path.Combine(mine, "Battles", "Shared"), locked: true);
+            Check(!duel.Locked, "sharing locked leaves the maker's own battle editable");
+            Check(Sharing.Import(lockedZip, theirs, TheirPath).Battle.Locked, "shared locked: put in locked");
+            Check(BattleFile.FromJson(duel.ToJson()).Locked == false && !duel.ToJson().Contains("locked"), "unlocked isn't written");
         }
         finally { try { Directory.Delete(home, true); } catch (Exception) { } }
         Console.WriteLine("SHARING_TESTS_OK: no folders in the zip, designs and decals in and back, reused on a second import");

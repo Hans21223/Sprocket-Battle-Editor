@@ -22,8 +22,9 @@ public sealed partial class BattleEditor
     CameraTrack? Cam => cam >= 0 && cam < C.Cameras.Count ? C.Cameras[cam] : null;
 
     /// Where a tank is for a following camera, in the editor: its marker.
-    (Vector3 At, float Yaw)? MarkerAnchor(string id) =>
+    (Vector3 At, float Yaw)? MarkerAnchor(string id) => C.Replay != null ? ReplayAnchor(id, replayTime) :
         file.Units.FirstOrDefault(u => u.Id == id) is { } u ? (Files.Vector(u.Position), u.Yaw) : null;
+    (Vector3 At, float Yaw)? EditingAnchor(string id, float at) => C.Replay != null ? ReplayAnchor(id, at) : MarkerAnchor(id);
 
     static (Vector3 At, float Yaw)? TankAnchor(string id) =>
         Battle.TankOf(id) is { } t ? (t.transform.position, t.transform.eulerAngles.y) : null;
@@ -53,18 +54,24 @@ public sealed partial class BattleEditor
         {
             float from = track.Keys[0].Time, to = track.Keys[^1].Time;
             for (int i = 0; i <= 80; i++)
-                if (Cinema.CameraAt(track, from + (to - from) * i / 80, MarkerAnchor) is { } p) path.Add(p.Position);
+            {
+                float at = from + (to - from) * i / 80;
+                if (Cinema.CameraAt(track, at, id => EditingAnchor(id, at)) is { } p) path.Add(p.Position);
+            }
         }
         for (int i = 0; i + 1 < path.Count; i++) marks.Add(Line(path[i], path[i + 1], 0, 0.25f, new Color(0.4f, 0.9f, 1f)));
-        for (int i = 0; i < track.Keys.Count; i++)
-            if (Cinema.CameraAt(track, track.Keys[i].Time, MarkerAnchor) is { } p)
+        for (int camera = 0; camera < C.Cameras.Count; camera++)
+        for (int i = 0; i < C.Cameras[camera].Keys.Count; i++)
+            if (Cinema.CameraAt(C.Cameras[camera], C.Cameras[camera].Keys[i].Time,
+                id => EditingAnchor(id, C.Cameras[camera].Keys[i].Time)) is { } p)
             {
                 var o = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 o.name = "Battle Editor camera key";
                 o.transform.SetPositionAndRotation(p.Position, p.Rotation);
                 o.transform.localScale = new Vector3(1.4f, 1f, 2f);
-                Colour(o, i == camKey ? Color.yellow : new Color(0.4f, 0.9f, 1f));
+                Colour(o, camera == cam && i == camKey ? Color.yellow : new Color(0.4f, 0.9f, 1f));
                 pickable[o.Pointer] = new Hit(null, Part.CamKey, i);
+                cameraWidgets[o.Pointer] = (camera, i, o);
                 marks.Add(o);
                 var lens = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
                 lens.transform.SetParent(o.transform, false);
@@ -74,9 +81,16 @@ public sealed partial class BattleEditor
                 NoCollider(lens);
                 Colour(lens, Color.white);
             }
+        foreach (var mark in marks)
+            if (mark != null) foreach (var part in mark.GetComponentsInChildren<Transform>(true)) part.gameObject.layer = CameraGizmoLayer;
+        if (view != null)
+        {
+            cameraViewMask ??= view.cullingMask;
+            view.cullingMask |= 1 << CameraGizmoLayer;
+        }
     }
 
-    /// Mouse on the map in the Cinematic tab: a camera key picks it (and moves the time cursor and view there), a tank
+    /// Mouse on the map in the Cinematic tab: select and drag a camera key without moving the editing view; a tank
     /// picks it for its keys.
     // A tank key's point or target, picked with the next click on the map.
     enum KeyPick { None, AimPoint, DrivePoint, Tank }
@@ -113,15 +127,16 @@ public sealed partial class BattleEditor
             Rebuild();
             return;
         }
+        if (PickCamera(ray) is { } camera) { BeginCameraMove(camera.Camera, camera.Key, mouse); return; }
         var hit = Pick(ray);
-        if (hit is { Part: Part.CamKey } k && Cam is { } track && k.Index < track.Keys.Count) { camKey = k.Index; scrub = track.Keys[k.Index].Time; ViewAt(scrub); Rebuild(); }
-        else if (hit is { Part: Part.Body or Part.Tip, Unit: { } unit }) { selected = unit; tankKey = -1; Rebuild(); }
+        if (hit is { Part: Part.Body or Part.Tip, Unit: { } unit }) { selected = unit; tankKey = -1; Rebuild(); }
     }
 
     /// The editor's view put where the picked camera is at `t` (the one being edited), or for `shown`, the camera the
     /// cuts show then (as it will play).
     void ViewAt(float t, bool shown = false)
     {
+        ReplayAt(t, sync: !previewing);
         if (view == null || C.Cameras.Count == 0) return;
         var track = !shown && Cam is { Keys.Count: > 0 } picked ? picked : C.Cameras[Cinema.Shown(C, t)];
         if (Cinema.CameraAt(track, t, MarkerAnchor) is not { } p) return;
@@ -150,6 +165,7 @@ public sealed partial class BattleEditor
     {
         if (C.Cameras.All(c => c.Keys.Count == 0)) { Say("Add camera keys first."); return; }
         previewing = true; previewAt = scrub < C.Length ? scrub : 0; previewFrame = Time.frameCount;
+        StartReplayAudio(previewAt);
         foreach (var o in marks) if (o != null) o.SetActive(false);
     }
 
@@ -157,18 +173,26 @@ public sealed partial class BattleEditor
     {
         previewAt += Time.unscaledDeltaTime * Math.Max(0.05f, C.Speed);
         ViewAt(previewAt, shown: true);
+        ReplayAudioAt(previewAt);
         bool click = Time.frameCount > previewFrame && Mouse.current is { } m && m.leftButton.wasPressedThisFrame; // not the Preview click itself
         if (previewAt > C.Length + 0.5f || keys.escapeKey.wasPressedThisFrame || click)
         {
-            previewing = false;
-            scrub = Math.Min(previewAt, C.Length);
-            Rebuild();
+            StopPreview();
         }
+    }
+
+    void StopPreview()
+    {
+        previewing = false;
+        StopReplayAudio();
+        scrub = Math.Min(previewAt, C.Length);
+        Rebuild();
+        Say("Preview stopped. Continue editing cameras or the timeline.");
     }
 
     void PreviewPanel()
     {
-        GUI.Box(new Rect(16, Screen.height - 46, 420, 30), $"Preview {previewAt:0.0} / {C.Length:0.0} s   (click or Esc stops)");
+        GUI.Box(new Rect(16, Screen.height - 46, 470, 30), $"Preview {previewAt:0.0} / {C.Length:0.0} s   (F9, Esc or click stops)");
     }
 
     // ---------- the panels ----------
@@ -176,22 +200,38 @@ public sealed partial class BattleEditor
     void CinemaPanels()
     {
         var c = C;
-        var box = Panel(new Rect(16, 56, 480, 15 * Row + 2 * Pad));
+        // Keep the timeline usable even if an optional preview/detail panel fails to render.
+        Timeline();
+        var box = Panel(new Rect(16, 56, 480, 17 * Row + 2 * Pad));
         float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
         Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
-        GUI.Label(Line(0, w), $"Cinematic: {c.Cameras.Count} cameras, {c.Cuts.Count} cuts, {c.Tanks.Count(t => t.Keys.Count > 0)} tanks keyed, {c.Length:0.0} s");
+        GUI.Label(Line(0, w), c.Replay != null
+            ? $"Replay: {c.Cameras.Count} cameras, {c.Cuts.Count} cuts, {c.Length:0.0} s"
+            : $"Battle cinematic: {c.Cameras.Count} cameras, {c.Cuts.Count} cuts, {c.Length:0.0} s");
+        y += Row;
+        float replayHalf = (w - 4) / 2;
+        if (c.Replay == null)
+        {
+            Button(Line(0, replayHalf), "Record battle", RecordReplay);
+            Button(Line(replayHalf + 4, replayHalf), "Replays — Edit", ListReplays);
+        }
+        else
+        {
+            Button(Line(0, replayHalf), "Open recording", ListReplays);
+            Button(Line(replayHalf + 4, replayHalf), "Load saved replay edits", LoadSaved);
+        }
         y += Row;
         float q = (w - 4 * 4) / 5;
-        Button(Line(0, q), "-1 s", () => { scrub = Math.Max(0, scrub - 1); ViewAt(scrub); });
-        Button(Line(q + 4, q), "-0.1 s", () => { scrub = Math.Max(0, scrub - 0.1f); ViewAt(scrub); });
-        Button(Line(2 * (q + 4), q), "+0.1 s", () => { scrub += 0.1f; ViewAt(scrub); });
-        Button(Line(3 * (q + 4), q), "+1 s", () => { scrub += 1; ViewAt(scrub); });
+        Button(Line(0, q), "-1 s", () => { scrub = Math.Max(0, scrub - 1); ScrubCameraView(scrub); });
+        Button(Line(q + 4, q), "-0.1 s", () => { scrub = Math.Max(0, scrub - 0.1f); ScrubCameraView(scrub); });
+        Button(Line(2 * (q + 4), q), "+0.1 s", () => { scrub += 0.1f; ScrubCameraView(scrub); });
+        Button(Line(3 * (q + 4), q), "+1 s", () => { scrub += 1; ScrubCameraView(scrub); });
         Button(Line(4 * (q + 4), q), "Preview", StartPreview);
         y += Row + 4;
 
         // Cameras (their keys are on the timeline below).
         GUI.Label(Line(0, w - 210), "Cameras (click to pick):");
-        Button(Line(w - 205, 100), "+ New", () => { c.Cameras.Add(new CameraTrack { Name = $"Camera {c.Cameras.Count + 1}" }); cam = c.Cameras.Count - 1; camKey = -1; Rebuild(); });
+        Button(Line(w - 205, 100), "+ New", AddCinemaCamera);
         Button(Line(w - 100, 100), "Delete", () =>
         {
             if (Cam is not { } gone) return;
@@ -224,7 +264,7 @@ public sealed partial class BattleEditor
             Button(Line(h + 4, h), track.Follow == null ? "Follows: no tank" : $"Follows: {track.Follow}", () =>
             {
                 string? was = track.Follow, next = NextUnit(track.Follow);
-                Cinema.Refollow(track, next, MarkerAnchor); // its keys stay where they were seen
+                Cinema.Refollow(track, next, EditingAnchor); // Each key stays where it was seen at its own replay time.
                 if (next != null && (track.LookAt == null || track.LookAt == was)) track.LookAt = next;
                 if (next == null && track.LookAt == was) track.LookAt = null;
                 Say(next == null ? $"{track.Name} stays where its keys put it." : $"{track.Name} follows {next} and looks at {track.LookAt ?? "where its keys point"}. Its keys move with {next}.");
@@ -235,32 +275,63 @@ public sealed partial class BattleEditor
             {
                 track.LookAt = NextUnit(track.LookAt);
                 Say(track.LookAt == null ? $"{track.Name} points where its keys point." : $"{track.Name} always points at {track.LookAt}.");
-                ViewAt(scrub);
+                ScrubCameraView(scrub);
                 Rebuild();
             });
             y += Row;
-            Button(Line(0, q), "FOV -5", () => { if (view != null) view.fieldOfView = Math.Clamp(view.fieldOfView - 5, 10, 110); });
-            Button(Line(q + 4, q), "FOV +5", () => { if (view != null) view.fieldOfView = Math.Clamp(view.fieldOfView + 5, 10, 110); });
-            GUI.Label(Line(2 * (q + 4), q), $" {view?.fieldOfView ?? 60:0}°");
+            Button(Line(0, q), "FOV -5", () => CameraFov(-5));
+            Button(Line(q + 4, q), "FOV +5", () => CameraFov(5));
+            GUI.Label(Line(2 * (q + 4), q), $" {CameraFovValue:0}°");
             Button(Line(3 * (q + 4), 2 * q + 4), $"Cut to it at {scrub:0.0} s", AddCut);
+            y += Row;
+            float quarter = (w - 12) / 4;
+            Button(Line(0, quarter), "Height -1 m", () => CameraHeight(-1));
+            Button(Line(quarter + 4, quarter), "Height +1 m", () => CameraHeight(1));
+            Button(Line(2 * (quarter + 4), quarter), "Use view", CameraUseView);
+            Toggle(Line(3 * (quarter + 4), quarter), cameraPovEnabled, " Camera view", () => cameraPovEnabled = !cameraPovEnabled);
+            y += Row;
+            float sixth = (w - 20) / 6;
+            Button(Line(0, sixth), "Yaw -5°", () => CameraRotate(-5, 0, 0));
+            Button(Line(sixth + 4, sixth), "Yaw +5°", () => CameraRotate(5, 0, 0));
+            Button(Line(2 * (sixth + 4), sixth), "Pitch -5°", () => CameraRotate(0, -5, 0));
+            Button(Line(3 * (sixth + 4), sixth), "Pitch +5°", () => CameraRotate(0, 5, 0));
+            Button(Line(4 * (sixth + 4), sixth), "Roll -5°", () => CameraRotate(0, 0, -5));
+            Button(Line(5 * (sixth + 4), sixth), "Roll +5°", () => CameraRotate(0, 0, 5));
+            y += Row;
+            GUI.Label(Line(0, w), "Drag: move. Shift-drag: height. Ctrl-drag: rotate.");
             y += Row;
         }
 
         y = box.y + box.height - Pad - 2 * Row;
         float half = (w - 4) / 2;
-        Toggle(Line(0, half), c.PlayOnStart, " Plays when the battle starts", () => c.PlayOnStart = !c.PlayOnStart);
-        Button(Line(half + 4, half), $"Battle speed: {c.Speed:0.##}x", () => c.Speed = c.Speed >= 1 ? 0.25f : c.Speed * 2);
-        y += Row;
-        FileButtons(Line, w);
-        TankKeysPanel();
-        Timeline();
+        if (c.Replay == null)
+        {
+            Toggle(Line(0, half), c.PlayOnStart, " Plays when the battle starts", () => c.PlayOnStart = !c.PlayOnStart);
+            Button(Line(half + 4, half), $"Battle speed: {c.Speed:0.##}x", () => c.Speed = c.Speed >= 1 ? 0.25f : c.Speed * 2);
+            y += Row;
+            FileButtons(Line, w);
+        }
+        else
+        {
+            Button(Line(0, half), "Top view", ToTopView);
+            Button(Line(half + 4, half), $"Replay speed: {c.Speed:0.##}x", () => c.Speed = c.Speed >= 1 ? 0.25f : c.Speed * 2);
+            y += Row;
+            float third = (w - 8) / 3;
+            Button(Line(0, third), "Save replay edits", Save);
+            Button(Line(third + 4, third), "Play replay", StartPreview);
+            Button(Line(2 * (third + 4), third), CanReturnFromReplay ? "Back to battle" : "Main menu",
+                () => { if (CanReturnFromReplay) BackFromReplay(); else ReturnToMainMenu(); });
+        }
+        Guard.Run("camera view panel", CameraPovPanel);
+        if (c.Replay != null) Guard.Run("replay details panel", ReplayInfoPanel);
+        else Guard.Run("tank keys panel", TankKeysPanel);
     }
 
     /// The picked tank's keys: its turret and gun pose, drive and shots at times.
     void TankKeysPanel()
     {
         var unit = selected;
-        var box = Panel(new Rect(Screen.width - 16 - 400, 56, 400, (unit == null ? 3 : 14) * Row + 2 * Pad));
+        var box = Panel(new Rect(Screen.width - 16 - 400, CameraDetailsY, 400, (unit == null ? 3 : 14) * Row + 2 * Pad));
         float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
         Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
         if (unit == null)
@@ -395,6 +466,9 @@ public sealed partial class BattleEditor
     internal static void Started(BattleFile battle, Dictionary<string, VehicleBehaviour> tanks)
     {
         Puppet.ReleaseAll();
+        instance?.AllowPlayReturn(battle);
+        if (instance?.pendingReplay is { } requested && ReferenceEquals(requested, battle))
+        { instance.BeginReplayCapture(battle, tanks); return; }
         if (instance == null || battle.Cinema is not { PlayOnStart: true } cinema || cinema.Cameras.All(c => c.Keys.Count == 0)) return;
         instance.StartCinema(cinema);
     }
@@ -421,7 +495,7 @@ public sealed partial class BattleEditor
         Time.timeScale = cinemaTimeBefore > 0 ? cinemaTimeBefore : 1;
         Puppet.ReleaseAll();
         Trace.Write($"cinematic: {why}");
-        Say($"Cinematic {why}. F9 edits, F10 commands.");
+        Say($"Cinematic {why}. F10 opens commands.");
     }
 
     void CinemaTick()

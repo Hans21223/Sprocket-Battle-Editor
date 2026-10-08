@@ -14,6 +14,7 @@ internal static class Shapes
 {
     // ponytail: every readable part goes in, inside ones too; cap it if big designs make the files or markers heavy.
     const int MaxPoints = 250_000;
+    const int MaxIndices = MaxPoints * 12;
 
     static readonly string Dir = Path.Combine(BepInEx.Paths.CachePath, "SprocketBattles-shapes");
     static readonly Dictionary<string, (Mesh? Mesh, long Stamp)> known = new(StringComparer.OrdinalIgnoreCase);
@@ -31,6 +32,7 @@ internal static class Shapes
         long stamp = StampOf(path);
         // A known miss (no shape) stays one until the file changes; a known shape is read again only if it's gone.
         if (known.TryGetValue(path, out var k) && k.Stamp == stamp && (k.Mesh is null || k.Mesh)) return k.Mesh;
+        if (k.Mesh != null) UnityEngine.Object.Destroy(k.Mesh);
         Mesh? mesh = null;
         try
         {
@@ -40,10 +42,24 @@ internal static class Shapes
                 using var r = new BinaryReader(File.OpenRead(file));
                 if (r.ReadInt64() == stamp)
                 {
-                    var points = new Vector3[r.ReadInt32()];
-                    for (int i = 0; i < points.Length; i++) points[i] = new Vector3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
-                    var triangles = new int[r.ReadInt32()];
-                    for (int i = 0; i < triangles.Length; i++) triangles[i] = r.ReadInt32();
+                    int count = r.ReadInt32();
+                    if (count < 1 || count > MaxPoints || r.BaseStream.Length - r.BaseStream.Position < count * 12L + 4)
+                        throw new InvalidDataException("Invalid cached vertex count");
+                    var points = new Vector3[count];
+                    for (int i = 0; i < points.Length; i++)
+                    {
+                        points[i] = new Vector3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
+                        if (!SpawnGround.Finite(points[i])) throw new InvalidDataException("Invalid cached vertex");
+                    }
+                    int indices = r.ReadInt32();
+                    if (indices < 3 || indices > MaxIndices || indices % 3 != 0 || r.BaseStream.Length - r.BaseStream.Position != indices * 4L)
+                        throw new InvalidDataException("Invalid cached triangle count");
+                    var triangles = new int[indices];
+                    for (int i = 0; i < triangles.Length; i++)
+                    {
+                        triangles[i] = r.ReadInt32();
+                        if (triangles[i] < 0 || triangles[i] >= count) throw new InvalidDataException("Invalid cached triangle index");
+                    }
                     mesh = MeshOf(Path.GetFileNameWithoutExtension(path), points, triangles);
                 }
             }
@@ -70,6 +86,7 @@ internal static class Shapes
             var v = mesh.vertices;
             if (points.Count + v.Length > MaxPoints) { left++; return; }
             var t = mesh.triangles;
+            if (triangles.Count + (long)t.Length > MaxIndices) { left++; return; }
             var m = toTank * part.localToWorldMatrix;
             int start = points.Count;
             for (int i = 0; i < v.Length; i++) points.Add(m.MultiplyPoint3x4(v[i]));
@@ -107,11 +124,15 @@ internal static class Shapes
     {
         // Kept by this class, which Unity can't see: without the flag, a scene change's clean-up would destroy it.
         var mesh = new Mesh { name = "Battle Editor shape " + name, hideFlags = HideFlags.DontUnloadUnusedAsset };
-        if (points.Length > 65535) mesh.indexFormat = IndexFormat.UInt32;
-        mesh.vertices = points;
-        mesh.triangles = triangles;
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
-        return mesh;
+        try
+        {
+            if (points.Length > 65535) mesh.indexFormat = IndexFormat.UInt32;
+            mesh.vertices = points;
+            mesh.triangles = triangles;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+        catch { UnityEngine.Object.Destroy(mesh); throw; }
     }
 }

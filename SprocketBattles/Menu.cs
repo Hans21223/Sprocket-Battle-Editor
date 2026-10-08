@@ -1,5 +1,6 @@
 using HarmonyLib;
 using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Sprocket;
 using Sprocket.CustomBattles;
 using UnityEngine;
@@ -9,8 +10,8 @@ namespace SprocketBattles;
 
 /// A Battle Editor button under the game's own Custom Battle button, wherever a menu adds that one. It opens the Battle
 /// Editor's own menu (MainMenu: your battles, new ones on any map). Starting one goes through the game's Custom Battle
-/// screen, under a plain cover, filled in and started for you (the map, the weather, and for Play the battle's tanks);
-/// a battle to edit opens in the editor once its tanks are in.
+/// screen, under a plain cover, filled in and started for you. Player-choice battles first open the normal full
+/// vehicle designer; a battle to edit opens in the battle editor once its tanks are in.
 [HarmonyPatch]
 internal static class Menu
 {
@@ -19,13 +20,29 @@ internal static class Menu
     internal static BattleFile? Opening;
 
     static UnityAction? customBattle;
+    static UnityAction? sandbox;
+    static IntPtr customBattlePanel;
     static UnityAction? ours; // one for good: the game holds on to it
+    static Il2CppStructArray<Vector3>? pickerCorners;
+
+    /// The native confirm button (including keyboard activation) must run the same pick checks as our overlay.
+    [HarmonyPrefix, HarmonyPatch(typeof(Sprocket.UI.Tab), nameof(Sprocket.UI.Tab.Click))]
+    static bool ConfirmPicked(Sprocket.UI.Tab __instance)
+    {
+        if (launch is not { Pick: true, Stage: 1 } l) return true;
+        var button = UnityEngine.Object.FindObjectOfType<CustomBattleCreation>()?.confirmButton;
+        if (button == null || button.Pointer != __instance.Pointer) return true;
+        Guard.Run("Battle Editor pick confirmation", () => StartPicked(l));
+        return false;
+    }
 
     [HarmonyPostfix, HarmonyPatch(typeof(MenuPanel), nameof(MenuPanel.Button))]
     static void Added(MenuPanel __instance, string label, UnityAction onClick, bool interactable) => Guard.Run("Battle Editor button", () =>
     {
+        if (label?.IndexOf("sandbox", StringComparison.OrdinalIgnoreCase) >= 0) sandbox = onClick;
         if (label == null || label.IndexOf("custom", StringComparison.OrdinalIgnoreCase) < 0 || label.IndexOf("battle", StringComparison.OrdinalIgnoreCase) < 0) return;
         customBattle = onClick;
+        customBattlePanel = __instance.Pointer;
         ours ??= DelegateSupport.ConvertDelegate<UnityAction>(new Action(Open))!;
         __instance.Button("Battle Editor", ours, interactable);
     });
@@ -38,15 +55,34 @@ internal static class Menu
 
     // ---------- starting a battle through the Custom Battle screen ----------
 
-    sealed class Launching { public string Map = ""; public BattleFile? File; public bool Play, Pick; public int Stage; public float Since; public string? Wrong; }
+    sealed class Launching { public string Map = ""; public BattleFile? File; public bool Play, Pick; public int Stage; public float Since; public string? Wrong; public List<string>? RestorePicks; }
     static Launching? launch;
 
-    internal static bool Busy => launch != null;
+    internal static bool Busy => launch != null || NativeDesigner.Busy;
 
-    /// Start a battle on `map`: to edit (`file`, or a new one) or to play `file` as made. A battle with Pick tanks to
-    /// play opens the screen as it is, for the player to pick theirs (Picking).
+    /// Start a battle on `map`: edit a mission, play its fixed tanks, or open the normal vehicle designer for its
+    /// player-choice tanks. The hidden Custom Battle screen supplies the game's normal loading transition.
     internal static void Launch(string map, BattleFile? file, bool play)
     {
+        if (file?.Cinema?.Replay != null) play = false; // Recorded actors open in the frozen cinematic editor.
+        if (!CanOpenMap(map)) return;
+        Gauntlet.CancelForOtherBattle(file);
+        if (play && file != null && file.PickCapacity > 0)
+        {
+            if (!NativeDesigner.BeginBattle(map, file)) return;
+            Trace.Write($"menu: preparing '{file.Name}' in the full vehicle designer on {map}");
+            MainMenu.Hide();
+            return;
+        }
+        LaunchConfigured(map, file, play);
+    }
+
+    /// The designer's finished lineup uses the Custom Battle screen only as a hidden loading bridge.
+    internal static void LaunchPrepared(string map, BattleFile played) => LaunchConfigured(map, played, true);
+
+    static void LaunchConfigured(string map, BattleFile? file, bool play)
+    {
+        if (!CanOpenMap(map)) return;
         if (customBattle == null) { Trace.Write("menu: no Custom Battle button seen, can't start"); MainMenu.Tell("The game's Custom Battle button wasn't found, so battles can't be started."); return; }
         bool pick = play && file != null && file.Slots.Count > 0;
         launch = new Launching { Map = map, File = file, Play = play, Pick = pick, Since = Time.unscaledTime };
@@ -56,13 +92,43 @@ internal static class Menu
         customBattle.Invoke();
     }
 
-    internal static void Cancel() { launch = null; MainMenu.HidePicker(); }
+    // Saved battles can still name a map that is no longer available. Validate before covering or leaving the menu;
+    // a raw Unity bundle is not a native Sprocket battle scene and cannot safely be launched by inventing a controller.
+    static bool CanOpenMap(string map)
+    {
+        try
+        {
+            var reason = MapBridge.Call("UnsupportedMapReason", map);
+            if (reason != null) throw new InvalidOperationException(reason);
+            var scenes = Sprocket.SceneManagement.ISceneManager.Instance
+                ?? UnityEngine.Object.FindObjectOfType<Sprocket.MainMenu>()?.context?.SceneManager;
+            NativeDesigner.ResolveDesignerScene(scenes, map);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            string reason = ex.InnerException?.Message ?? ex.Message;
+            Trace.Write($"menu: map '{map}' rejected before loading: {reason}");
+            MainMenu.Tell(reason);
+            return false;
+        }
+    }
+
+    internal static void Cancel()
+    {
+        launch = null;
+        Battle.RestorePickTeam();
+        EditNext = false;
+        Opening = null;
+        MainMenu.HidePicker();
+    }
 
     /// Every frame while starting: once the Custom Battle screen is up, its map, weather (and for Play, its teams) set;
     /// once it's waiting for its start button, that pressed; pressed again if the screen is still there 2.5 s later.
     /// The Battle Editor's menu covers it all and closes when the screen goes (the game took the battle).
     internal static void Step()
     {
+        NativeDesigner.Step();
         if (launch is not { } l) return;
         var screen = UnityEngine.Object.FindObjectOfType<CustomBattleCreation>();
         var edit = screen?.ConfigEdit;
@@ -97,8 +163,19 @@ internal static class Menu
             config.MapName = l.Map;
             string? error = l.Pick ? Battle.PreparePick(config.Teams, l.File!)
                           : l.Play && l.File != null ? Battle.Prepare(config.Teams, l.File) : Battle.FillEmpty(config.Teams);
-            if (error != null) { Trace.Write($"menu: {error}"); launch = null; MainMenu.Uncover(); MainMenu.Tell(error); return; }
+            if (error == null && l.Pick && l.RestorePicks != null)
+            {
+                error = Battle.RestorePicks(config.Teams[0], l.RestorePicks);
+                l.RestorePicks = null;
+            }
+            if (error != null)
+            {
+                Trace.Write($"menu: {error}"); launch = null;
+                Battle.RestorePickTeam(); MainMenu.HidePicker();
+                MainMenu.Uncover(); MainMenu.Tell(error); return;
+            }
             Weather(screen, config, l.File);
+            if (l.Pick) edit!.SetActiveTeam(0);
             edit!.RaiseDirtyFlags(BattleConfigDirtyFlags.Everything);
             l.Stage = 1; l.Since = Time.unscaledTime;
             return;
@@ -130,11 +207,11 @@ internal static class Menu
         MainMenu.ShowPicker(() => StartPicked(l));
         if (screen.confirmButton?.GetComponent<RectTransform>() is { } start)
         {
-            var corners = new Vector3[4];
+            var corners = pickerCorners ??= new Il2CppStructArray<Vector3>(4);
             start.GetWorldCorners(corners);
             var lim = file.Limits ?? new PickLimits();
-            string status = l.Wrong ?? $"{file.Name}: pick up to {file.Slots.Count} of your tanks for Team 1 ({picked.Count} picked" +
-                (lim.Budget > 0 ? $", {picked.Sum(p => p.Cost):N0} of {lim.Budget:N0}" : "") + ")" +
+            string status = l.Wrong ?? $"{file.Name}: pick up to {file.PickCapacity} of your tanks for Team 1 ({picked.Count} picked" +
+                (lim.Budget > 0 ? $", {picked.Sum(p => (long)p.Cost):N0} of {lim.Budget:N0}" : "") + ")" +
                 (lim.MaxCost > 0 ? $"\nEach at most {lim.MaxCost:N0}" : "\n") + (lim.Eras.Count > 0 ? $"{(lim.MaxCost > 0 ? ", " : "")}{PickLimits.Describe(lim.Eras)}" : "");
             MainMenu.PlacePicker(new Vector2(corners[0].x, corners[0].y), new Vector2(corners[2].x, corners[2].y), status, l.Wrong != null);
         }
@@ -143,23 +220,76 @@ internal static class Menu
 
     static float wrongUntil;
 
+    internal static bool HasCurrentCustomBattleButton => UnityEngine.Object.FindObjectOfType<Sprocket.MainMenu>()?.panel?.Pointer == customBattlePanel;
+
+    static Action? OpenSandboxAction()
+    {
+        if (sandbox != null) return () => sandbox.Invoke();
+        if (UnityEngine.Object.FindObjectOfType<Sprocket.MainMenu>() is { screens: { } menus } main)
+            for (int i = 0; i < menus.Length; i++)
+                if (menus[i]?.TryCast<SceneChangeMenuScreen>() is { } change && change.Label?.IndexOf("sandbox", StringComparison.OrdinalIgnoreCase) >= 0 && change.SceneDefinition?.Scene?.SceneName is { } scene)
+                    return () => main.LoadSceneAsyncVoid(scene);
+        return null;
+    }
+
+    /// Open the selected design in the game's full Sandbox vehicle designer and return to this same battle's picker.
+    internal static void EditSelectedTank()
+    {
+        if (launch is not { Pick: true, Stage: 1 } l || NativeDesigner.Busy) return;
+        var screen = UnityEngine.Object.FindObjectOfType<CustomBattleCreation>();
+        var teams = screen?.ConfigEdit?.Config?.Teams;
+        if (screen == null || teams == null) return;
+        if (screen.cancelButton == null || screen.linkedCts == null || MainMenu.Unloading)
+        { l.Wrong = "Tank selection is still opening. Try Edit selected tank again in a moment."; wrongUntil = Time.unscaledTime + 6; return; }
+        var selected = UnityEngine.Object.FindObjectOfType<UnitConfigurationUI>()?.displayedUnit;
+        var picks = Battle.Picked(teams[0]);
+        string chosen = selected?.Path ?? picks.FirstOrDefault().Path ?? "";
+        if (string.IsNullOrEmpty(chosen)) { l.Wrong = "Select a tank card first, then click Edit selected tank."; wrongUntil = Time.unscaledTime + 6; return; }
+        string path = Files.Absolute(chosen);
+        if (!File.Exists(path)) { l.Wrong = "The selected tank file couldn't be found. Choose another tank card."; wrongUntil = Time.unscaledTime + 6; return; }
+        Action? openSandbox = OpenSandboxAction();
+        if (openSandbox == null) { l.Wrong = "The game's Sandbox menu wasn't found. Return to the main menu once, then try again."; wrongUntil = Time.unscaledTime + 6; return; }
+        var paths = picks.Select(p => Files.Absolute(p.Path)).ToList();
+        if (!paths.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase)) && paths.Count < l.File!.PickCapacity) paths.Add(path);
+        var file = BattleFile.FromJson(l.File!.ToJson());
+        var map = l.Map;
+        if (!NativeDesigner.Begin(path, openSandbox, saved =>
+        {
+            if (!string.IsNullOrEmpty(saved))
+                for (int i = 0; i < paths.Count; i++) if (string.Equals(paths[i], path, StringComparison.OrdinalIgnoreCase)) paths[i] = saved;
+            LaunchConfigured(map, file, true);
+            if (launch is { } resume) resume.RestorePicks = paths;
+        })) return;
+        launch = null;
+        Battle.RestorePickTeam();
+        MainMenu.HidePicker();
+        screen.cancelButton?.Click();
+    }
+
     /// Start battle: the picks checked against the battle's limits, then put into its Pick tanks (their places, orders
     /// and parts in the mission kept), the teams made the battle's, and the game's start pressed as for any battle.
     static void StartPicked(Launching l)
     {
         var screen = UnityEngine.Object.FindObjectOfType<CustomBattleCreation>();
         var config = screen?.ConfigEdit?.Config;
-        if (screen == null || config?.Teams == null || launch != l) return;
+        if (screen == null || config?.Teams == null || launch != l || !l.Pick || l.Stage != 1) return;
+        if (screen.linkedCts == null || MainMenu.Unloading)
+        {
+            l.Wrong = "The tank selection screen is still opening. Try Start battle again in a moment.";
+            wrongUntil = Time.unscaledTime + 6;
+            return;
+        }
         var picked = Battle.Picked(config.Teams[0]);
         var file = l.File!;
         string? error = file.CheckPicks(picked.Select(p => (p.Name, p.Cost, (string?)Files.EraOf(p.Path))).ToList());
         if (error == null)
         {
             var played = file.WithPicks(picked.Select(p => Files.Relative(p.Path)).ToList());
-            Battle.UnpickTeam(config.Teams);
             error = Battle.Prepare(config.Teams, played);
             if (error == null)
             {
+                // Keep the picker limits intact if reading any design fails. Only lift them once all teams are ready.
+                Battle.UnpickTeam(config.Teams);
                 Trace.Write($"menu: picked {string.Join(", ", picked.Select(p => p.Name))} for '{file.Name}'");
                 l.File = played; l.Pick = false;
                 MainMenu.HidePicker();

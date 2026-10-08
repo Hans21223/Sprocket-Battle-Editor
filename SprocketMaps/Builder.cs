@@ -26,8 +26,9 @@ internal static class Builder
     {
         try
         {
+            if (CustomMapBridge.Waiting(__instance)) return;
             var scene = __instance.gameObject.scene;
-            if (Maps.Built(scene.name) is not { } map) return;
+            if ((CustomMapBridge.BuildMap(__instance) ?? Maps.Built(scene.name)) is not { } map) return;
             bool deathmatch = false;
             if (__1 != null)
                 for (int i = 0; i < __1.Length; i++)
@@ -57,14 +58,15 @@ internal static class Builder
         SceneManager.MoveGameObjectToScene(root, scene);
         var mode = root.AddComponent<DeathmatchGameMode>();
         var teams = new Il2CppReferenceArray<DeathmatchGameMode.TeamDeathmatchConfig>(2);
-        teams[0] = Team(root, "Attackers", MissionFlags.Attackers, 1, 2, attackers, defenders, 120);
-        teams[1] = Team(root, "Defenders", MissionFlags.Defenders, 2, 1, defenders, attackers, 64);
+        float spacing = CustomMapBridge.LoadName(map.Identifier) != null ? CustomMapBridge.SpawnSpacing : 15;
+        teams[0] = Team(root, "Attackers", MissionFlags.Attackers, 1, 2, attackers, defenders, 120, spacing, map.Spawns);
+        teams[1] = Team(root, "Defenders", MissionFlags.Defenders, 2, 1, defenders, attackers, 64, spacing, map.Spawns);
         mode.teams = teams;
         Plugin.ModLog.LogInfo($"{map.Identifier}: custom battle setup built (attackers at {attackers}, defenders at {defenders})");
         return mode;
     }
 
-    static DeathmatchGameMode.TeamDeathmatchConfig Team(GameObject root, string name, MissionFlags flags, byte own, byte enemy, Vector3 at, Vector3 toward, byte movePriority)
+    static DeathmatchGameMode.TeamDeathmatchConfig Team(GameObject root, string name, MissionFlags flags, byte own, byte enemy, Vector3 at, Vector3 toward, byte movePriority, float spacing, int count)
     {
         var team = Child(root.transform, name, Vector3.zero, Quaternion.identity);
         var facing = Quaternion.LookRotation(Flat(toward - at));
@@ -105,16 +107,22 @@ internal static class Builder
         spawner.appendNameID = true;
         spawnerObject.AddComponent<KillObjective>().minFractionKilled = 1;
 
-        // 16 places in four rows of four, 15 m apart, the front row nearest the enemy, on the ground.
+        // Native maps keep their 4x4 rows; custom maps use the capacity checked by their author.
         var points = Child(team.transform, "Spawn Points", at, facing);
         var spawnPoints = points.AddComponent<SpawnPoints>();
         spawnPoints.random = false;
+        spawnPoints.randomOnConnectingLines = false;
         var side = facing * Vector3.right; var back = facing * Vector3.back;
-        for (int i = 0; i < 16; i++)
+        var off = new List<string>();
+        for (int i = 0; i < count; i++)
         {
-            var spot = at + side * ((i % 4 - 1.5f) * 15) + back * (i / 4 * 15);
-            Child(points.transform, i.ToString(), Ground(spot), facing);
+            var offset = SpawnFormation.Offset(count, i, spacing);
+            var spot = at + side * offset.Side + back * offset.Back;
+            var ground = SpawnSpot(spot, out var on);
+            if (on != null) off.Add($"{i} on {on} at {ground.y:0.0}");
+            Child(points.transform, i.ToString(), ground, facing);
         }
+        if (off.Count > 0) Plugin.ModLog.LogInfo($"{name}: spawn points not on the terrain: {string.Join(", ", off)}");
         return new DeathmatchGameMode.TeamDeathmatchConfig { mission = mission, spawner = spawner, spawnPoints = spawnPoints };
     }
 
@@ -157,11 +165,33 @@ internal static class Builder
 
     static Vector3 Flat(Vector3 v) { v.y = 0; return v.sqrMagnitude < 0.01f ? Vector3.forward : v; }
 
-    static Vector3 Ground(Vector3 at)
+    /// The ground under a point: the map's terrain where it has one. The first solid surface down from 1000 m up could be
+    /// something high (Sandbox spawn points ended up about 250 m in the air, and tanks fell from there).
+    static Vector3 Ground(Vector3 at) => Ground(at, out _);
+
+    /// Conservative staging clearance before the vehicle's geometry is available. SpawnPoints.Get preserves this
+    /// child height; ground snapping is a separate authoring operation, not part of the runtime picker.
+    static Vector3 SpawnSpot(Vector3 at, out string? on)
     {
-        foreach (var hit in Physics.RaycastAll(new Vector3(at.x, at.y + 1000, at.z), Vector3.down, 3000).OrderBy(h => h.distance))
-            if (hit.collider != null && !hit.collider.isTrigger) return hit.point + Vector3.up * 0.5f;
-        return at;
+        var middle = Ground(at, out on);
+        float top = middle.y;
+        for (int x = -2; x <= 2; x++)
+            for (int z = -2; z <= 2; z++)
+                if (x != 0 || z != 0) top = Math.Max(top, Ground(new Vector3(at.x + x * 4, at.y, at.z + z * 4), out _).y);
+        return new Vector3(middle.x, top + 2f, middle.z); // Ground's 0.5 m and 2 more
+    }
+
+    /// `on`: what it stands on when that isn't terrain (null on terrain).
+    static Vector3 Ground(Vector3 at, out string? on)
+    {
+        var hits = Physics.RaycastAll(new Vector3(at.x, at.y + 1000, at.z), Vector3.down, 3000, ~0, QueryTriggerInteraction.Ignore)
+            .Where(h => h.collider != null).OrderBy(h => h.distance).ToList();
+        on = null;
+        foreach (var hit in hits)
+            if (hit.collider.TryCast<TerrainCollider>() != null) return hit.point + Vector3.up * 0.5f;
+        if (hits.Count == 0) return at;
+        on = hits[0].collider.name;
+        return hits[0].point + Vector3.up * 0.5f;
     }
 
     static GameObject Child(Transform parent, string name, Vector3 position, Quaternion rotation)

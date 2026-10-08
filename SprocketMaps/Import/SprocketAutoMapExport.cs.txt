@@ -1,0 +1,589 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.AI;
+using UnityEngine.SceneManagement;
+
+/// <summary>Converts staged scenery into a validated map without touching the user's source files.</summary>
+public static class SprocketAutoMapExport
+{
+    static string SourceScene, ExportScene, Output, BundleName, InputModel;
+    const float Spacing = 8f;
+    [Serializable] public sealed class Report
+    {
+        public string unityVersion, sourceScene = SourceScene, exportScene = ExportScene, bundlePath, bundleSha256, error;
+        public bool ready, originalsPreserved, originalImportersRestored, pathComplete;
+        public int addedGroundColliders, addedStructureColliders, totalSolidColliders, readableCollisionMeshes, navigationSources, navigationTriangles, navigationCorners, protectedFiles;
+        public int searchCandidates, pathTestedPairs, formationTestedPairs;
+        public int spawnCount = 16;
+        public float agentRadius = 2.5f, agentHeight = 5f, agentSlope = 23f, agentClimb = .5f, voxelSize = 2.5f / 3f, spawnSpacing = Spacing;
+        public Vector3 boundsCenter, boundsSize, markerA, markerB;
+        public List<string> temporarilyReadableModels = new List<string>();
+        public List<string> failures = new List<string>();
+        public List<SpawnCheck> spawnChecks = new List<SpawnCheck>();
+        public List<CapacityAttempt> capacityAttempts = new List<CapacityAttempt>();
+    }
+    [Serializable] public sealed class SpawnCheck
+    {
+        public string team, collider;
+        public int index;
+        public Vector3 ground, navigation;
+        public float normalY;
+        public bool clear, footprintSupported;
+    }
+    [Serializable] public sealed class CapacityAttempt
+    {
+        public int count, candidates, pathChecks, formationChecks;
+        public bool succeeded;
+        public string reason;
+    }
+    [Serializable] sealed class MapManifest { public int schemaVersion = 1; public int spawnCount; public string displayName; }
+    sealed class ImportBackup
+    {
+        public string path;
+        public bool readable;
+        public byte[] meta;
+    }
+
+    public static void Build()
+    {
+        var args = Environment.GetCommandLineArgs();
+        string Argument(string name) { int at = Array.IndexOf(args, name); if (at < 0 || at + 1 >= args.Length) throw new InvalidOperationException("Missing " + name); return args[at + 1]; }
+        Output = Argument("-sprocketOutput");
+        var mapName = Argument("-sprocketMap");
+        if (Application.unityVersion != "6000.3.21f1") throw new InvalidOperationException("Map import needs Unity 6000.3.21f1 exactly.");
+        BundleName = mapName + ".bundle";
+        ExportScene = "Assets/MapExport/" + mapName + ".unity";
+        Directory.CreateDirectory(Output);
+        Status("Importing scenery and textures");
+        SourceScene = PrepareSource();
+        var readyPath = Path.Combine(Output, "ready.json");
+        if (File.Exists(readyPath)) File.Delete(readyPath);
+        var report = new Report { unityVersion = Application.unityVersion, bundlePath = Path.Combine(Output, BundleName) };
+        var hashes = SnapshotOriginals();
+        report.protectedFiles = hashes.Count;
+        var importers = new List<ImportBackup>();
+        NavMeshData navigation = null;
+        NavMeshDataInstance navigationInstance = default;
+        bool succeeded = false;
+        try
+        {
+            Debug.Log("SPROCKET_MAP_EXPORT_BEGIN: original assets protected; exporting a separate scene.");
+            var source = EditorSceneManager.OpenScene(SourceScene, OpenSceneMode.Single);
+            Sanitize(source);
+            var collisionModels = MeshFilters(source).Where(IncludeCollision).Select(f => f.sharedMesh)
+                .Concat(Components<MeshCollider>(source).Select(c => c.sharedMesh))
+                .Where(m => m != null).Select(AssetDatabase.GetAssetPath).Distinct().OrderBy(p => p).ToArray();
+            foreach (var path in collisionModels)
+            {
+                if (!(AssetImporter.GetAtPath(path) is ModelImporter importer)) continue;
+                importers.Add(new ImportBackup { path = path, readable = importer.isReadable, meta = File.ReadAllBytes(path + ".meta") });
+            }
+            foreach (var backup in importers)
+            {
+                var importer = (ModelImporter)AssetImporter.GetAtPath(backup.path);
+                if (!importer.isReadable)
+                {
+                    importer.isReadable = true;
+                    importer.SaveAndReimport();
+                    report.temporarilyReadableModels.Add(backup.path);
+                }
+            }
+            // Reload references after importing; source files have not received any scene edits.
+            source = EditorSceneManager.OpenScene(SourceScene, OpenSceneMode.Single);
+            Sanitize(source);
+            RemapMaterials(source);
+            Status("Adding solid ground and collision");
+            foreach (var filter in MeshFilters(source).Where(IncludeCollision))
+            {
+                if (filter.GetComponent<Collider>() != null) continue;
+                if (!filter.sharedMesh.isReadable) throw new InvalidOperationException("Unreadable collision source: " + filter.name);
+                var collider = filter.gameObject.AddComponent<MeshCollider>();
+                collider.sharedMesh = filter.sharedMesh;
+                collider.convex = false;
+                collider.isTrigger = false;
+                if (IsGround(filter)) report.addedGroundColliders++;
+                else report.addedStructureColliders++;
+            }
+
+            foreach (var root in source.GetRootGameObjects())
+                if (root.GetComponentsInChildren<MonoBehaviour>(true).Length != 0)
+                    throw new InvalidOperationException("Environment export contains a runtime script: " + root.name);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(ExportScene));
+            if (!EditorSceneManager.SaveScene(source, ExportScene)) throw new IOException("Could not save separate export scene.");
+            AssetDatabase.Refresh();
+            Physics.SyncTransforms();
+            var solids = Components<Collider>(source).Where(c => c.enabled && !c.isTrigger && c.gameObject.activeInHierarchy).ToArray();
+            if (solids.Length == 0) throw new InvalidOperationException("The map has no solid ground or geometry.");
+            var bounds = solids[0].bounds;
+            foreach (var collider in solids.Skip(1)) bounds.Encapsulate(collider.bounds);
+            report.boundsCenter = bounds.center; report.boundsSize = bounds.size; report.totalSolidColliders = solids.Length;
+            if (bounds.size.x < 100 || bounds.size.z < 100 || bounds.size.x > 10000 || bounds.size.z > 10000)
+                throw new InvalidOperationException("Map ground must span at least 100 metres on both horizontal axes and no more than 10 kilometres.");
+            var collisionMeshes = solids.OfType<MeshCollider>().Select(c => c.sharedMesh).Distinct().ToArray();
+            foreach (var mesh in collisionMeshes)
+                if (mesh == null || !mesh.isReadable) throw new InvalidOperationException("Export collision mesh must retain Read/Write: " + (mesh == null ? "null" : mesh.name));
+            report.readableCollisionMeshes = collisionMeshes.Length;
+            var sources = new List<NavMeshBuildSource>();
+            UnityEditor.AI.NavMeshEditorHelpers.CollectSourcesInStage(bounds, ~0, NavMeshCollectGeometry.PhysicsColliders, 0,
+                new List<NavMeshBuildMarkup>(), source, sources);
+            report.navigationSources = sources.Count;
+            if (sources.Count != solids.Length) throw new InvalidOperationException("Navigation did not collect every repaired solid collider: " + sources.Count + " / " + solids.Length);
+            foreach (var buildSource in sources)
+                if (buildSource.sourceObject is Mesh mesh && !mesh.isReadable)
+                    throw new InvalidOperationException("Runtime navigation would omit unreadable mesh: " + mesh.name);
+            var settings = NavMesh.GetSettingsByID(0);
+            settings.agentRadius = report.agentRadius; settings.agentHeight = report.agentHeight;
+            settings.agentSlope = report.agentSlope; settings.agentClimb = report.agentClimb;
+            settings.overrideVoxelSize = true; settings.voxelSize = report.voxelSize;
+            Debug.Log("SPROCKET_MAP_NAVIGATION_BEGIN: sources=" + sources.Count + ", native tank radius=2.5 height=5 slope=23 climb=0.5.");
+            navigation = UnityEngine.AI.NavMeshBuilder.BuildNavMeshData(settings, sources, bounds, Vector3.zero, Quaternion.identity);
+            if (navigation == null) throw new InvalidOperationException("Tank navigation bake returned no data.");
+            NavMesh.RemoveAllNavMeshData(); // This isolated editor process owns no game scene navigation.
+            navigationInstance = NavMesh.AddNavMeshData(navigation);
+            if (!navigationInstance.valid) throw new InvalidOperationException("Tank navigation bake could not be registered.");
+            var triangles = NavMesh.CalculateTriangulation();
+            report.navigationTriangles = triangles.indices.Length / 3;
+            if (report.navigationTriangles == 0) throw new InvalidOperationException("Tank navigation bake is empty.");
+            File.WriteAllText(Path.Combine(Output, "custom-map-navigation.json"), JsonUtility.ToJson(new NavigationSnapshot { vertices = triangles.vertices, indices = triangles.indices }));
+            Status("Checking tank navigation and safe starting positions");
+            bool pairFound = false;
+            foreach (var count in new[] { 16, 8, 4, 2, 1 })
+            {
+                report.spawnCount = count;
+                report.searchCandidates = report.pathTestedPairs = report.formationTestedPairs = 0;
+                var attempt = new CapacityAttempt { count = count }; report.capacityAttempts.Add(attempt);
+                try
+                {
+                    var transforms = Components<Transform>(source).ToArray();
+                    var a = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area A");
+                    var b = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area B");
+                    bool authored = false;
+                    if (a != null && b != null)
+                        try
+                        {
+                            report.markerA = Ground(source, bounds, a.position.x, a.position.z);
+                            report.markerB = Ground(source, bounds, b.position.x, b.position.z);
+                            authored = (report.markerA-report.markerB).sqrMagnitude >= 10000
+                                && PairWorks(source, bounds, report.markerA, report.markerB, count);
+                        } catch (InvalidOperationException) { }
+                    if (!authored)
+                    {
+                        var found = FindPair(source, bounds, report);
+                        report.markerA = found.Item1; report.markerB = found.Item2;
+                    }
+                    pairFound = true; attempt.succeeded = true;
+                }
+                catch (InvalidOperationException ex) { attempt.reason = ex.Message; }
+                attempt.candidates = report.searchCandidates; attempt.pathChecks = report.pathTestedPairs; attempt.formationChecks = report.formationTestedPairs;
+                if (pairFound) break;
+            }
+            if (!pairFound) throw new InvalidOperationException("No safe connected tank formation pair exists at capacities 16, 8, 4, 2 or 1.");
+            Marker(source, "Sprocket Spawn Area A", report.markerA);
+            Marker(source, "Sprocket Spawn Area B", report.markerB);
+            if (!EditorSceneManager.SaveScene(source, ExportScene)) throw new IOException("Could not save validated spawn markers.");
+            ValidateTeam(source, bounds, report, "A", report.markerA, report.markerB);
+            ValidateTeam(source, bounds, report, "B", report.markerB, report.markerA);
+            var pathToOtherTeam = new NavMeshPath();
+            report.pathComplete = NavMesh.CalculatePath(report.markerA, report.markerB, NavMesh.AllAreas, pathToOtherTeam)
+                && pathToOtherTeam.status == NavMeshPathStatus.PathComplete;
+            report.navigationCorners = pathToOtherTeam.corners.Length;
+            if (!report.pathComplete) report.failures.Add("No complete native tank navigation path connects marker A and marker B.");
+            if (report.failures.Count != 0) throw new InvalidOperationException(string.Join("\n", report.failures));
+            Debug.Log("SPROCKET_MAP_VALIDATION_PASS: capacity=" + report.spawnCount + ", positions=" + report.spawnCount * 2
+                + ", footprint corners=" + report.spawnCount * 8 + ", tank clearance and complete navigation path.");
+            Status("Saving the imported map");
+            var manifest = BuildPipeline.BuildAssetBundles(Output,
+                new[] { new AssetBundleBuild { assetBundleName = BundleName, assetNames = new[] { ExportScene } } },
+                BuildAssetBundleOptions.ForceRebuildAssetBundle | BuildAssetBundleOptions.ChunkBasedCompression, BuildTarget.StandaloneWindows64);
+            if (manifest == null || !File.Exists(report.bundlePath)) throw new InvalidOperationException("AssetBundle export did not produce its bundle.");
+            succeeded = true;
+        }
+        catch (Exception ex)
+        {
+            report.error = ex.ToString();
+            Debug.LogError("SPROCKET_MAP_EXPORT_FAILED: " + ex.Message);
+        }
+        finally
+        {
+            if (navigationInstance.valid) navigationInstance.Remove();
+            if (navigation != null) UnityEngine.Object.DestroyImmediate(navigation);
+            // Close the working copy before importer restoration so transient collision edits cannot be saved to supplied files.
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            bool restored = true;
+            foreach (var backup in importers)
+            {
+                try
+                {
+                    var importer = (ModelImporter)AssetImporter.GetAtPath(backup.path);
+                    if (importer.isReadable != backup.readable)
+                    {
+                        importer.isReadable = backup.readable;
+                        importer.SaveAndReimport();
+                    }
+                    // Preserve even serialization formatting and importer version bytes.
+                    if (!File.ReadAllBytes(backup.path + ".meta").SequenceEqual(backup.meta))
+                    {
+                        File.WriteAllBytes(backup.path + ".meta", backup.meta);
+                        AssetDatabase.ImportAsset(backup.path, ImportAssetOptions.ForceUpdate);
+                    }
+                    if (((ModelImporter)AssetImporter.GetAtPath(backup.path)).isReadable != backup.readable
+                        || !File.ReadAllBytes(backup.path + ".meta").SequenceEqual(backup.meta)) restored = false;
+                }
+                catch (Exception ex)
+                {
+                    restored = false; report.failures.Add("Importer restoration failed: " + backup.path + ": " + ex.Message);
+                }
+            }
+            report.originalImportersRestored = restored;
+            report.originalsPreserved = hashes.All(p => File.Exists(p.Key) && Hash(p.Key) == p.Value);
+            if (!report.originalsPreserved) report.failures.Add("A protected supplied asset changed.");
+            if (!restored) report.failures.Add("Source model import settings were not fully restored.");
+            report.ready = succeeded && restored && report.originalsPreserved;
+            if (report.ready) report.bundleSha256 = Hash(report.bundlePath);
+            File.WriteAllText(Path.Combine(Output, "custom-map-validation.json"), JsonUtility.ToJson(report, true));
+            if (report.ready)
+            {
+                File.WriteAllText(readyPath, JsonUtility.ToJson(report, true));
+                File.WriteAllText(Path.ChangeExtension(report.bundlePath, ".json"),
+                    JsonUtility.ToJson(new MapManifest { spawnCount = report.spawnCount, displayName = Array.IndexOf(args,"-sprocketDisplayName") >= 0 ? Argument("-sprocketDisplayName") : mapName }, true));
+                Debug.Log("SPROCKET_CUSTOM_MAP_READY: " + report.bundlePath + " SHA256=" + report.bundleSha256);
+            }
+        }
+        if (!report.ready) throw new InvalidOperationException("Map export is not playable-ready. See custom-map-validation.json: " + report.error);
+    }
+
+    [Serializable] sealed class NavigationSnapshot { public Vector3[] vertices; public int[] indices; }
+    static bool PairWorks(Scene scene, Bounds bounds, Vector3 a, Vector3 b, int count, bool checkPath = true)
+    {
+        if (checkPath)
+        {
+            var path = new NavMeshPath();
+            if (!NavMesh.CalculatePath(a, b, NavMesh.AllAreas, path) || path.status != NavMeshPathStatus.PathComplete) return false;
+        }
+        var trial = new Report { spawnCount = count };
+        ValidateTeam(scene, bounds, trial, "A", a, b);
+        if (trial.failures.Count != 0) return false;
+        ValidateTeam(scene, bounds, trial, "B", b, a);
+        return trial.failures.Count == 0;
+    }
+    static Tuple<Vector3, Vector3> FindPair(Scene scene, Bounds bounds, Report report)
+    {
+        var candidates = new List<Vector3>();
+        var columns = Mathf.CeilToInt(Mathf.Sqrt(report.spawnCount));
+        var rows = Mathf.CeilToInt(report.spawnCount / (float)columns);
+        var halfSize = Mathf.Max((columns - 1) * Spacing * .5f + 4, (rows - 1) * Spacing * .5f + 4);
+        for (int iz = 1; iz < 32; iz++)
+            for (int ix = 1; ix < 32; ix++)
+            {
+                float x = Mathf.Lerp(bounds.min.x,bounds.max.x,ix/32f);
+                float z = Mathf.Lerp(bounds.min.z,bounds.max.z,iz/32f);
+                if (!Physics.Raycast(new Vector3(x, bounds.max.y + 100, z), Vector3.down, out var hit, bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore)
+                    || hit.collider.gameObject.scene != scene || hit.normal.y < .95f) continue;
+                if (!NavMesh.SamplePosition(hit.point, out var nav, .75f, NavMesh.AllAreas)
+                    || Mathf.Abs(nav.position.x - x) > .05f || Mathf.Abs(nav.position.z - z) > .05f
+                    || Mathf.Abs(nav.position.y - hit.point.y) > 1) continue;
+                if (Physics.CheckBox(hit.point + Vector3.up * 3, new Vector3(halfSize, 2.4f, halfSize), Quaternion.identity, ~0, QueryTriggerInteraction.Ignore)) continue;
+                candidates.Add(hit.point);
+            }
+        report.searchCandidates = candidates.Count;
+        Debug.Log("SPROCKET_MAP_SPAWN_SEARCH: capacity=" + report.spawnCount + ", candidate " + halfSize * 2 + "m squares=" + candidates.Count);
+        var pairs = new List<(int A, int B, float Distance)>();
+        for (int i = 0; i < candidates.Count; i++)
+            for (int j = i + 1; j < candidates.Count; j++)
+            {
+                var distance = (candidates[i] - candidates[j]).sqrMagnitude;
+                if (distance >= 100 * 100) pairs.Add((i, j, distance));
+            }
+        pairs.Sort((a,b) => b.Distance.CompareTo(a.Distance));
+        foreach (var pair in pairs)
+        {
+            var a = candidates[pair.A]; var b = candidates[pair.B]; var path = new NavMeshPath();
+            if (++report.pathTestedPairs > 50000) throw new InvalidOperationException("Map navigation search exceeded its limit. Add two clear spawn areas named Sprocket Spawn Area A and Sprocket Spawn Area B.");
+            if (!NavMesh.CalculatePath(a, b, NavMesh.AllAreas, path) || path.status != NavMeshPathStatus.PathComplete) continue;
+            report.formationTestedPairs++;
+            if (!PairWorks(scene, bounds, a, b, report.spawnCount, false)) continue;
+            Debug.Log("SPROCKET_MAP_SPAWN_PAIR_FOUND: A=" + a + " B=" + b + " distance=" + Mathf.Sqrt(pair.Distance));
+            return Tuple.Create(a, b);
+        }
+        throw new InvalidOperationException("No connected clear " + report.spawnCount + "-tank formation pair exists in the map scenery: " + candidates.Count
+            + " candidates, " + report.pathTestedPairs + " path checks, " + report.formationTestedPairs + " full formation checks.");
+    }
+
+    static IEnumerable<T> Components<T>(Scene scene) where T : Component => scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<T>(true));
+    static IEnumerable<MeshFilter> MeshFilters(Scene scene) => Components<MeshFilter>(scene).Where(f => f.sharedMesh != null && f.gameObject.activeInHierarchy);
+    static bool IsGround(MeshFilter filter) => filter.name == "city_part_demo_main1" || filter.name == "city_part_demo_main2";
+    static bool IncludeCollision(MeshFilter filter) => filter.sharedMesh != null;
+    static void Marker(Scene scene, string name, Vector3 at)
+    {
+        var existing = Components<Transform>(scene).FirstOrDefault(t => t.name == name);
+        var marker = existing != null ? existing.gameObject : new GameObject(name);
+        marker.transform.SetParent(null,true); SceneManager.MoveGameObjectToScene(marker, scene); marker.transform.position = at;
+    }
+    static Vector3 Ground(Scene scene, Bounds bounds, float x, float z)
+    {
+        if (!Physics.Raycast(new Vector3(x, bounds.max.y + 100, z), Vector3.down, out var hit, bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore)
+            || hit.collider.gameObject.scene != scene || hit.normal.y < .95f)
+            throw new InvalidOperationException("Unsupported or steep ground at " + x + ", " + z);
+        return hit.point;
+    }
+    static void ValidateTeam(Scene scene, Bounds bounds, Report report, string name, Vector3 center, Vector3 toward)
+    {
+        var direction = toward - center; direction.y = 0;
+        var facing = Quaternion.LookRotation(direction); var side = facing * Vector3.right; var back = facing * Vector3.back;
+        var columns = Mathf.CeilToInt(Mathf.Sqrt(report.spawnCount));
+        var rows = Mathf.CeilToInt(report.spawnCount / (float)columns);
+        var frontRow = center + direction.normalized * (Spacing * (rows - 1) * .5f);
+        for (int i = 0; i < report.spawnCount; i++)
+        {
+            var place = frontRow + side * ((i % columns - (columns - 1) * .5f) * Spacing) + back * (i / columns * Spacing);
+            var check = new SpawnCheck { team = name, index = i }; report.spawnChecks.Add(check);
+            try
+            {
+                check.ground = Ground(scene, bounds, place.x, place.z);
+                var ray = new Ray(new Vector3(place.x, bounds.max.y + 100, place.z), Vector3.down);
+                Physics.Raycast(ray, out var hit, bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore);
+                check.collider = hit.collider.name; check.normalY = hit.normal.y;
+                if (!NavMesh.SamplePosition(check.ground, out var nav, .75f, NavMesh.AllAreas)) throw new InvalidOperationException("not on tank navigation");
+                check.navigation = nav.position;
+                if (Mathf.Abs(nav.position.x - check.ground.x) > .05f || Mathf.Abs(nav.position.z - check.ground.z) > .05f)
+                    throw new InvalidOperationException("outside navigation polygon footprint");
+                if (Mathf.Abs(nav.position.y - check.ground.y) > 1 || Mathf.Abs(check.ground.y - center.y) > 1) throw new InvalidOperationException("uneven ground");
+                var overlaps = Physics.OverlapBox(check.ground + Vector3.up * 3, new Vector3(4, 2.4f, 4), facing, ~0, QueryTriggerInteraction.Ignore);
+                check.clear = overlaps.Length == 0;
+                if (!check.clear) throw new InvalidOperationException("tank volume intersects " + string.Join(", ", overlaps.Select(c => c.name).Distinct()));
+                for (int x = -1; x <= 1; x += 2)
+                    for (int z = -1; z <= 1; z += 2)
+                    {
+                        var corner = place + side * (x * 4) + back * (z * 4);
+                        var support = Ground(scene, bounds, corner.x, corner.z);
+                        if (Mathf.Abs(support.y - check.ground.y) > .5f || !NavMesh.SamplePosition(support, out var footprintNav, .75f, NavMesh.AllAreas)
+                            || Mathf.Abs(footprintNav.position.y - support.y) > 1
+                            || Mathf.Abs(footprintNav.position.x - support.x) > .05f || Mathf.Abs(footprintNav.position.z - support.z) > .05f)
+                            throw new InvalidOperationException("unsupported footprint corner");
+                    }
+                check.footprintSupported = true;
+            }
+            catch (Exception ex) { report.failures.Add("Team " + name + " position " + i + " at " + place + ": " + ex.Message); }
+        }
+    }
+    static Dictionary<string, string> SnapshotOriginals() => Directory.GetFiles("Assets/Input","*",SearchOption.AllDirectories).ToDictionary(p=>p,Hash);
+    static string Hash(string path)
+    {
+        using (var stream = File.OpenRead(path)) using (var sha = SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+    }
+
+    static void Status(string message) { File.WriteAllText(Path.Combine(Output,"status.txt"),message); Debug.Log("SPROCKET_IMPORT_STAGE: " + message); }
+    static string PrepareSource()
+    {
+        AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+        var all = Directory.GetFiles("Assets/Input","*",SearchOption.AllDirectories);
+        var args = Environment.GetCommandLineArgs();
+        int selectedAt = Array.IndexOf(args,"-sprocketModel");
+        string selected = selectedAt >= 0 && selectedAt + 1 < args.Length ? args[selectedAt + 1].Replace('\\','/') : null;
+        if (selected != null && (!selected.StartsWith("Assets/Input/",StringComparison.Ordinal) || !all.Any(p=>p.Replace('\\','/') == selected)))
+            throw new InvalidOperationException("The selected model is missing from the isolated map inputs.");
+        var scene = selected == null ? all.Where(p=>Path.GetExtension(p).Equals(".unity",StringComparison.OrdinalIgnoreCase)).OrderByDescending(p=>new FileInfo(p).Length).ThenBy(p=>p,StringComparer.Ordinal).FirstOrDefault() : null;
+        if (scene != null) return scene.Replace('\\','/');
+        var model = selected ?? all.Where(p=>new[]{".obj",".fbx",".prefab"}.Contains(Path.GetExtension(p).ToLowerInvariant())).OrderByDescending(p=>new FileInfo(p).Length).ThenBy(p=>p,StringComparer.Ordinal).FirstOrDefault();
+        if (model == null) throw new InvalidOperationException("No scenery model or Unity scene found.");
+        InputModel = model.Replace('\\','/');
+        if (AssetImporter.GetAtPath(InputModel) is ModelImporter importer)
+        {
+            importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
+            importer.SaveAndReimport();
+        }
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(InputModel);
+        if (!prefab) throw new InvalidOperationException("The scenery model could not import.");
+        var working = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene,NewSceneMode.Single);
+        var root = UnityEngine.Object.Instantiate(prefab); root.name = Path.GetFileNameWithoutExtension(InputModel);
+        Directory.CreateDirectory("Assets/MapWorking");
+        const string path = "Assets/MapWorking/source.unity";
+        if (!EditorSceneManager.SaveScene(working,path)) throw new IOException("Could not prepare the imported scene.");
+        return path;
+    }
+    static void Sanitize(Scene scene)
+    {
+        foreach (var body in Components<Rigidbody>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(body);
+        foreach (var transform in Components<Transform>(scene).ToArray()) GameObjectUtility.RemoveMonoBehavioursWithMissingScript(transform.gameObject);
+        foreach (var script in Components<MonoBehaviour>(scene).ToArray()) if (script != null) UnityEngine.Object.DestroyImmediate(script);
+        foreach (var camera in Components<Camera>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(camera);
+        foreach (var listener in Components<AudioListener>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(listener);
+        foreach (var audio in Components<AudioSource>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(audio);
+        foreach (var animator in Components<Animator>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(animator);
+        foreach (var animation in Components<Animation>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(animation);
+    }
+    sealed class Mtl
+    {
+        public string Name,Texture;
+        public Color Color=Color.white;
+        public Vector2 Scale=Vector2.one,Offset=Vector2.zero;
+    }
+    static List<string> MtlTokens(string text)
+    {
+        var tokens=new List<string>();var word=new System.Text.StringBuilder();bool quoted=false;
+        foreach(var c in text)
+        {
+            if(c=='"') {quoted=!quoted;continue;}
+            if(c=='#' && !quoted) break;
+            if(char.IsWhiteSpace(c) && !quoted) {if(word.Length>0){tokens.Add(word.ToString());word.Clear();}}
+            else word.Append(c);
+        }
+        if(quoted) throw new InvalidOperationException("An OBJ material contains an unfinished quoted name.");
+        if(word.Length>0) tokens.Add(word.ToString());return tokens;
+    }
+    static bool MtlFloat(string text,out float value)
+    {
+        return float.TryParse(text,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out value)
+            && !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+    static void MtlTexture(Mtl material,List<string> tokens,string folder,string boundary)
+    {
+        int at=1;
+        while(at<tokens.Count && tokens[at].StartsWith("-",StringComparison.Ordinal))
+        {
+            var option=tokens[at++];
+            if(option is "-s" or "-o" or "-t")
+            {
+                var values=new List<float>();
+                while(at<tokens.Count && values.Count<3 && MtlFloat(tokens[at],out var number)) {values.Add(number);at++;}
+                if(values.Count==0) throw new InvalidOperationException("Missing OBJ material texture option values: "+option);
+                if(option=="-s") material.Scale=new Vector2(values[0],values.Count>1?values[1]:1);
+                if(option=="-o") material.Offset=new Vector2(values[0],values.Count>1?values[1]:0);
+            }
+            else
+            {
+                int count=option=="-mm"?2:option is "-blendu" or "-blendv" or "-boost" or "-clamp" or "-imfchan" or "-texres" or "-type" or "-cc"?1:0;
+                if(count==0 || at+count>=tokens.Count) throw new InvalidOperationException("Unsupported or incomplete OBJ material texture option: "+option);
+                at+=count;
+            }
+        }
+        if(at>=tokens.Count) throw new InvalidOperationException("An OBJ material is missing its texture file name.");
+        var reference=string.Join(" ",tokens.Skip(at)).Replace('\\','/');
+        var texture=Path.GetFullPath(Path.Combine(folder,reference));
+        if(!texture.StartsWith(boundary,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("An OBJ texture reference points outside its map files.");
+        material.Texture=Path.GetRelativePath(Directory.GetCurrentDirectory(),texture).Replace('\\','/');
+    }
+    static Dictionary<string,Mtl> ReadMtl()
+    {
+        var result = new Dictionary<string,Mtl>();
+        if (string.IsNullOrEmpty(InputModel) || !InputModel.EndsWith(".obj",StringComparison.OrdinalIgnoreCase)) return result;
+        var folder=Path.GetDirectoryName(InputModel);
+        var boundary=Path.GetFullPath("Assets/Input").TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
+        foreach(var mtl in Directory.GetFiles(folder,"*.mtl"))
+        {
+            Mtl current=null;
+            foreach(var line in File.ReadLines(mtl))
+            {
+                var tokens=MtlTokens(line);if(tokens.Count==0) continue;
+                if(tokens[0]=="newmtl") { current=new Mtl{Name=string.Join(" ",tokens.Skip(1))}; result[current.Name]=current; }
+                else if(current!=null && tokens[0]=="Kd")
+                {
+                    if(tokens.Count<4 || !MtlFloat(tokens[1],out var r) || !MtlFloat(tokens[2],out var g) || !MtlFloat(tokens[3],out var b))
+                        throw new InvalidOperationException("An OBJ material has invalid diffuse colour values.");
+                    current.Color=new Color(r,g,b,current.Color.a);
+                }
+                else if(current!=null && (tokens[0]=="d" || tokens[0]=="Tr"))
+                {
+                    if(tokens.Count<2 || !MtlFloat(tokens[tokens.Count-1],out var alpha)) throw new InvalidOperationException("An OBJ material has invalid opacity.");
+                    var color=current.Color;color.a=Mathf.Clamp01(tokens[0]=="Tr"?1-alpha:alpha);current.Color=color;
+                }
+                else if(current!=null && tokens[0]=="map_Kd") MtlTexture(current,tokens,folder,boundary);
+            }
+        }
+        return result;
+    }
+    static void RemapMaterials(Scene scene)
+    {
+        Directory.CreateDirectory("Assets/MapExport/Materials"); AssetDatabase.Refresh();
+        var replacements=new Dictionary<Material,Material>(); var mtl=ReadMtl();
+        var standard=Shader.Find("Standard");
+        if(!standard) throw new InvalidOperationException("Standard material conversion shader is unavailable.");
+        foreach(var renderer in Components<Renderer>(scene))
+        {
+            var slots=renderer.sharedMaterials;
+            for(int i=0;i<slots.Length;i++)
+            {
+                var old=slots[i]; if(!old) continue;
+                if(!replacements.TryGetValue(old,out var material))
+                {
+                    material=new Material(standard){name=old.name};
+                    var serialized=new SerializedObject(old); var saved=serialized.FindProperty("m_SavedProperties");
+                    SerializedProperty TextureEntry(string key)
+                    {
+                        var array=saved.FindPropertyRelative("m_TexEnvs");
+                        for(int a=0;a<array.arraySize;a++) {var entry=array.GetArrayElementAtIndex(a);if(entry.FindPropertyRelative("first").stringValue==key)return entry.FindPropertyRelative("second");}
+                        return null;
+                    }
+                    Texture Texture(string key) => TextureEntry(key)?.FindPropertyRelative("m_Texture").objectReferenceValue as Texture;
+                    void TextureTransform(string from, string to)
+                    {
+                        var entry=TextureEntry(from); if(entry==null) return;
+                        material.SetTextureScale(to,entry.FindPropertyRelative("m_Scale").vector2Value);
+                        material.SetTextureOffset(to,entry.FindPropertyRelative("m_Offset").vector2Value);
+                    }
+                    Color ColorValue(string key,Color fallback)
+                    {
+                        var array=saved.FindPropertyRelative("m_Colors");
+                        for(int a=0;a<array.arraySize;a++) {var entry=array.GetArrayElementAtIndex(a);if(entry.FindPropertyRelative("first").stringValue==key)return entry.FindPropertyRelative("second").colorValue;}
+                        return fallback;
+                    }
+                    float FloatValue(string key,float fallback)
+                    {
+                        var array=saved.FindPropertyRelative("m_Floats");
+                        for(int a=0;a<array.arraySize;a++) {var entry=array.GetArrayElementAtIndex(a);if(entry.FindPropertyRelative("first").stringValue==key)return entry.FindPropertyRelative("second").floatValue;}
+                        return fallback;
+                    }
+                    var baseSlot=Texture("_BaseColorMap")?"_BaseColorMap":Texture("_BaseMap")?"_BaseMap":"_MainTex";
+                    var texture=Texture(baseSlot);
+                    var color=ColorValue("_BaseColor",ColorValue("_Color",Color.white));
+                    if(mtl.TryGetValue(old.name,out var authored))
+                    {
+                        color=authored.Color;
+                        texture=null; // An untextured MTL material must not inherit the importer's fallback texture.
+                        if(!string.IsNullOrEmpty(authored.Texture))
+                        {
+                            texture=AssetDatabase.LoadAssetAtPath<Texture2D>(authored.Texture);
+                            if(!texture) throw new InvalidOperationException("Missing OBJ texture: "+authored.Texture);
+                        }
+                    }
+                    material.SetTexture("_MainTex",texture); material.SetColor("_Color",color);
+                    TextureTransform(baseSlot,"_MainTex");
+                    if(authored!=null) {material.SetTextureScale("_MainTex",authored.Scale);material.SetTextureOffset("_MainTex",authored.Offset);}
+                    material.SetFloat("_Glossiness",FloatValue("_Smoothness",FloatValue("_Glossiness",.15f)));
+                    material.SetFloat("_Metallic",FloatValue("_Metallic",0));
+                    var normal=Texture("_NormalMap")??Texture("_BumpMap");
+                    if(normal) {material.SetTexture("_BumpMap",normal);material.SetFloat("_BumpScale",FloatValue("_NormalScale",FloatValue("_BumpScale",1)));material.EnableKeyword("_NORMALMAP");}
+                    if(normal) TextureTransform(Texture("_NormalMap")?"_NormalMap":"_BumpMap","_BumpMap");
+                    bool transparent=FloatValue("_Surface",0)>0.5f || FloatValue("_SurfaceType",0)>0.5f || FloatValue("_Mode",0)>=2 || color.a<.999f;
+                    bool clipped=FloatValue("_AlphaClip",0)>0.5f || FloatValue("_AlphaCutoffEnable",0)>0.5f || old.IsKeywordEnabled("_ALPHATEST_ON");
+                    if(clipped) {material.SetFloat("_Mode",1);material.EnableKeyword("_ALPHATEST_ON");material.SetFloat("_Cutoff",FloatValue("_AlphaCutoff",FloatValue("_Cutoff",.5f)));material.renderQueue=2450;}
+                    else if(transparent)
+                    {
+                        material.SetFloat("_Mode",3);material.EnableKeyword("_ALPHAPREMULTIPLY_ON");material.renderQueue=3000;
+                        material.SetInt("_SrcBlend",(int)UnityEngine.Rendering.BlendMode.One);
+                        material.SetInt("_DstBlend",(int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                        material.SetInt("_ZWrite",0);
+                    }
+                    material.SetColor("_EmissionColor",ColorValue("_EmissionColor",ColorValue("_EmissiveColor",Color.black)));
+                    var emission=Texture("_EmissionMap")??Texture("_EmissiveColorMap");
+                    if(emission) { material.SetTexture("_EmissionMap",emission);TextureTransform(Texture("_EmissionMap")?"_EmissionMap":"_EmissiveColorMap","_EmissionMap"); }
+                    if(emission || material.GetColor("_EmissionColor").maxColorComponent>0) material.EnableKeyword("_EMISSION");
+                    string path="Assets/MapExport/Materials/"+replacements.Count.ToString("D4")+".mat";
+                    if(AssetDatabase.LoadAssetAtPath<Material>(path)) AssetDatabase.DeleteAsset(path);
+                    AssetDatabase.CreateAsset(material,path); replacements.Add(old,material);
+                }
+                slots[i]=material;
+            }
+            renderer.sharedMaterials=slots;
+        }
+        AssetDatabase.SaveAssets();
+    }
+}

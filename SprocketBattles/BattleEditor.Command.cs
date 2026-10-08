@@ -64,9 +64,11 @@ public sealed partial class BattleEditor
     static bool Commandable(VehicleBehaviour t) => t != null && t.ControlType != Sprocket.Vehicles.Control.ControlType.Player;
 
     /// Commandable, and of the team a click or box picks from.
-    bool Pickable(VehicleBehaviour t) => Commandable(t) && (showTeam < 0 || (int)t.ID.TeamID == showTeam);
+    bool Pickable(VehicleBehaviour t) => Commandable(t) && (showTeam < 0 || GroupOf(t) == showTeam);
 
     static string TeamName(int team) => team == 0 ? "Blue" : team == 1 ? "Red" : $"Team {team + 1}";
+    static int GroupOf(VehicleBehaviour tank) => Battle.UnitOf(tank)?.Team ?? (int)tank.ID.TeamID - 1;
+    static string TankSide(VehicleBehaviour tank) => Battle.Playing?.FreeForAll == true ? "FFA" : TeamName(GroupOf(tank));
 
     bool OnScreen(VehicleBehaviour t, out Vector2 at)
     {
@@ -134,7 +136,7 @@ public sealed partial class BattleEditor
         foreach (var t in seen)
         {
             if (t == null) continue;
-            string name = (Battle.UnitOf(t)?.Id ?? "tank") + " " + TeamName((int)t.ID.TeamID);
+            string name = (Battle.UnitOf(t)?.Id ?? "tank") + " " + TankSide(t);
             if (t.ControlType == Sprocket.Vehicles.Control.ControlType.Player) name += " (you)";
             else if (Battle.Commanded(t)) name += " *";
             if (Chosen(t) || allRoutes) { var task = Battle.Task(t); if (task != "") name += ": " + task.Replace("Task", ""); }
@@ -179,10 +181,10 @@ public sealed partial class BattleEditor
             int sent = 0, sameTeam = 0;
             foreach (var t in chosen)
             {
-                if (t.ID.TeamID == enemy.ID.TeamID) { sameTeam++; continue; }
+                if (Battle.Playing?.FreeForAll != true && t.ID.TeamID == enemy.ID.TeamID) { sameTeam++; continue; }
                 if (Battle.SendAgainst(t, enemy)) { attacking[t.Pointer] = enemy; sent++; }
             }
-            Say(sameTeam == chosen.Count ? $"That tank is on the same team ({TeamName((int)enemy.ID.TeamID)}): right click a tank of the other team to attack."
+            Say(sameTeam == chosen.Count ? $"That tank is on the same team ({TankSide(enemy)}): right click a tank of the other team to attack."
                 : $"{sent} of {chosen.Count} tanks attack{(sameTeam > 0 ? $" ({sameTeam} are on its team)" : "")}.");
         }
         else if (Ground(view!.ScreenPointToRay(at)) is { } spot) MoveChosen(spot);
@@ -213,6 +215,17 @@ public sealed partial class BattleEditor
     {
         foreach (var t in chosen) { Battle.Free(t); attacking.Remove(t.Pointer); }
         Say($"{chosen.Count} tanks back to the game's AI.");
+        nextDraw = nextLook = 0;
+    }
+
+    void ForceStopChosen()
+    {
+        if (chosen.Count == 0) { Say("Select one or more AI tanks to force stop."); return; }
+        if (puppet != null && Chosen(puppet)) ReleasePuppet();
+        int stopped = 0;
+        foreach (var tank in chosen)
+            if (Battle.ForceStop(tank)) { attacking.Remove(tank.Pointer); stopped++; }
+        Say($"{stopped} of {chosen.Count} tanks held in place. They can still aim and fire; a new move or attack order releases them.");
         nextDraw = nextLook = 0;
     }
 
@@ -275,7 +288,7 @@ public sealed partial class BattleEditor
 
     // ---------- on screen ----------
 
-    static Rect CommandPanel => new(16, 56, 560, 8 * Row + 2 * Pad);
+    static Rect CommandPanel => new(16, 56, 560, 10 * Row + 2 * Pad);
 
     // ---------- force control: one tank's drive, guns and trigger yours ----------
 
@@ -325,10 +338,10 @@ public sealed partial class BattleEditor
     void PuppetPanel()
     {
         if (puppet == null || Puppet.Of(puppet) is not { } s) return;
-        var box = Panel(new Rect(16, 56 + 8 * Row + 2 * Pad + 8, 560, 8 * Row + 2 * Pad));
+        var box = Panel(new Rect(16, CommandPanel.yMax + 8, 560, 8 * Row + 2 * Pad));
         float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
         Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
-        GUI.Label(Line(0, w), $"Force control: {s.Name} ({TeamName((int)puppet.ID.TeamID)}). Arrows drive, G fires.");
+        GUI.Label(Line(0, w), $"Force control: {s.Name} ({TankSide(puppet)}). Arrows drive, G fires.");
         y += Row;
         float t = (w - 3 * 4) / 4;
         Toggle(Line(0, t), s.Drive, " Drive", () => { s.Drive = !s.Drive; Puppet.Changed(); });
@@ -377,10 +390,14 @@ public sealed partial class BattleEditor
         Button(Line(2 * (b + 4), b), allRoutes ? "Lines: all" : "Lines: selected", () => { allRoutes = !allRoutes; nextDraw = nextLook = 0; });
         Button(Line(3 * (b + 4), b), "Back to driving", () => StopCommand());
         y += Row;
-        Button(Line(0, b), showTeam < 0 ? "Pick: both teams" : $"Pick: {TeamName(showTeam)} only", () => { showTeam = showTeam < 1 ? showTeam + 1 : -1; });
+        string group = TeamName(showTeam) + (Battle.Playing?.FreeForAll == true ? " group" : " only");
+        Button(Line(0, b), showTeam < 0 ? "Pick: all tanks" : $"Pick: {group}", () => { showTeam = showTeam < 1 ? showTeam + 1 : -1; });
         Button(Line(b + 4, b), "Drive it", DriveChosen);
-        Button(Line(2 * (b + 4), b), "Free to game AI", FreeChosen);
+        Button(Line(2 * (b + 4), b), "Force stop", ForceStopChosen);
         Button(Line(3 * (b + 4), b), Battle.OverrideGame ? "Override: on" : "Override: off", () => Battle.OverrideGame = !Battle.OverrideGame);
+        y += Row;
+        Button(Line(0, b), "Release to AI", FreeChosen);
+        GUI.Label(Line(b + 4, w - b - 4), "Force stop: holds position; new move / attack releases it.");
         y += Row;
         string sight = Battle.SightEvery == 0 ? $"auto (now 1 in {Battle.SightNow})" : Battle.SightEvery == 1 ? "game rate" : $"1 in {Battle.SightEvery}";
         Button(Line(0, b), "AI sight: " + sight.Replace("auto (now ", "auto (").Replace("game rate", "full"), () => Battle.SightEvery = (Battle.SightEvery + 1) % 4);
@@ -389,9 +406,15 @@ public sealed partial class BattleEditor
         y += Row;
         GUI.Label(Line(0, w), $"{seen.Count} tanks, {Battle.AICount} AIs, mod {modMs:0.00} ms/frame. * = your orders only (Override).");
         y += Row;
+        if (Battle.Playing != null)
+        {
+            Button(Line(0, 220), "Record current battle", RecordRunningBattle);
+            GUI.Label(Line(230, w - 230), "Starts now, without restarting.");
+        }
+        y += Row;
         GUI.Label(Line(0, w), "Left click / drag a box: select tanks (Shift: add). Esc: none.");
         y += Row;
-        GUI.Label(Line(0, w), "Right click the ground: go there. Right click a tank of the other team: attack it.");
+        GUI.Label(Line(0, w), Battle.Playing?.FreeForAll == true ? "Right click the ground: move. Right click any other tank: attack." : "Right click the ground: move. Right click an enemy tank: attack.");
         y += Row;
         GUI.Label(Line(0, w), "Right drag: look. Middle drag: pan. Wheel: zoom. Space: pause. P: all lines. F10: back.");
         PuppetPanel();

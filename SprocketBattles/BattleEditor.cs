@@ -5,7 +5,7 @@ using UnityEngine.Rendering.HighDefinition;
 
 namespace SprocketBattles;
 
-/// The Battle Editor, over a running custom battle (F9): the battle freezes, a free camera flies over the map, and
+/// The Battle Editor, opened from Edit battle in the main menu: the battle freezes, a free camera flies over the map, and
 /// tanks are placed as markers (a box the size of a tank, its team's colour, a light block at its front). Keys and the
 /// mouse are read directly (the game's on-screen GUI doesn't pass its own events to mods).
 public sealed partial class BattleEditor : MonoBehaviour
@@ -16,6 +16,39 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     /// A message on screen from outside the editor (the battle's order runner), open or not.
     internal static void Tell(string text) => instance?.Say(text);
+
+    internal static bool ReturnToMainMenu()
+    {
+        try
+        {
+            var scenes = Sprocket.SceneManagement.ISceneManager.Instance
+                ?? throw new InvalidOperationException("The game's scene manager isn't ready.");
+            if (!scenes.TryGetFirstScene(Sprocket.SceneManagement.SceneFlags.MainMenu, out var menu))
+                throw new InvalidOperationException("The game's main menu scene wasn't found.");
+            var game = UnityEngine.Object.FindObjectOfType<Sprocket.GameControl.GameController>()
+                ?? throw new InvalidOperationException("The game's scene controller isn't ready.");
+            instance?.PrepareSceneExit();
+            game.RequestSceneChange(menu);
+            return true;
+        }
+        catch (Exception ex) { Trace.Write($"battle scene exit: {ex}"); Tell(ex.Message); return false; }
+    }
+
+    void PrepareSceneExit()
+    {
+        StopReplayCapture(false);
+        pendingReplay = null;
+        pendingPlayReturn = null;
+        suspendedEditor.Clear();
+        if (commanding) StopCommand();
+        if (cinemaPlaying) StopCinema("Returning to the main menu.");
+        if (editing) Leave();
+        Puppet.ReleaseAll();
+        Battle.EndScene();
+        Mission.Stop();
+        foreach (var action in gameInput) action?.Enable();
+        gameInput.Clear(); bannerHeld = false; pausing = -1;
+    }
 
     bool editing;
     BattleFile file = new();
@@ -32,7 +65,7 @@ public sealed partial class BattleEditor : MonoBehaviour
     // What editing changed, put back on leaving.
     float timeScaleBefore = 1;
     Camera? gameCamera;
-    readonly List<(Transform Tank, Vector3 At, Quaternion Turn)> movedTanks = new();
+    readonly Dictionary<IntPtr, (Renderer Renderer, bool Enabled, bool RenderingOff)> hiddenRenderers = new();
     readonly List<InputAction> gameInput = new();
     readonly List<Canvas> hud = new();
     readonly List<UnityEngine.Rendering.VolumeComponent> fogs = new();
@@ -40,6 +73,7 @@ public sealed partial class BattleEditor : MonoBehaviour
     bool cursorBefore;
     // The editor's own camera: the game's follows the player's tank from a parent object, putting itself back each frame.
     Camera? view;
+    UnityEngine.SceneManagement.Scene? viewScene;
     float yaw, pitch;
     string map = "";
     (Vector3 At, float Height) topView;
@@ -58,6 +92,18 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     public void FixedUpdate() => fixedSteps++;
 
+    public void LateUpdate()
+    {
+        // Native LOD updates can re-enable models while the editor's simulation is frozen.
+        // Rendering-off suppresses those models without disabling or relocating their vehicle.
+        if (!editing) return;
+        foreach (var (renderer, _, _) in hiddenRenderers.Values)
+            if (renderer != null && !renderer.forceRenderingOff) renderer.forceRenderingOff = true;
+        foreach (var (renderer, _) in hiddenBelts) renderer.visible = false;
+        foreach (var (source, _) in mutedNativeAudio) if (source != null && !source.mute) source.mute = true;
+        Guard.Run("camera view preview", CameraPovTick);
+    }
+
     public void Update()
     {
         frameMs += (Time.unscaledDeltaTime * 1000 - frameMs) * 0.05f;
@@ -72,33 +118,43 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     void Tick()
     {
+        Battle.StepSceneLifetime();
+        // A persistent editor component must release its view when the native battle scene goes away.
+        if ((editing || commanding || cinemaPlaying || view != null) && viewScene is { } owned
+            && (!owned.IsValid() || !owned.isLoaded))
+        { Menu.Cancel(); PrepareSceneExit(); }
+        QueueRestartCompletion();
         Battle.PlaceSpawned();
         Battle.RunOrders();
         if (Battle.Mode != null) Battle.ThrottleSight();
         Guard.Run("mission", Mission.Tick);
+        Guard.Run("free-for-all", FreeForAll.Tick);
+        Guard.Run("gauntlet", Gauntlet.Tick);
         Guard.Run("force control", Puppet.Update);
         Guard.Run("cinematic", CinemaTick);
         Guard.Run("menu", MenuLaunch);
+        Guard.Run("replay recording", ReplayTick);
         if (pausing >= 0 && !editing && !commanding)
         {
             // Left with Esc: the battle stays still under the pause menu; if no pause menu came, it goes on as before.
             if (UnityEngine.SceneManagement.SceneManager.GetSceneByName("PauseMenu").isLoaded) pausing = -1;
             else if (Time.unscaledTime - pausing > 0.6f) { pausing = -1; Time.timeScale = timeScaleBefore; }
         }
+        ResumeTick();
         // Started from the Battle Editor's menu: open once the battle's tanks are in (with the battle picked there).
         if (Menu.EditNext && !editing)
         {
             if (Battle.Mode is { } started)
             {
-                if (Battle.Spawned(started))
+                if (Battle.Spawned(started) && MapBridge.Call("MapNotReadyReason", Battle.Map(started)) == null)
                 {
                     Menu.EditNext = false;
                     Enter(started);
                     if (Menu.Opening is { } picked)
                     {
                         Menu.Opening = null;
-                        file = picked;
-                        Select(null); ToTopView();
+                        replayReturn = null;
+                        SetEditorFile(picked, Tab.Tanks);
                         Say(string.Equals(picked.Map, map, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(picked.Map)
                             ? $"Editing {picked.Name} on {map}." : $"{picked.Name} was made on {picked.Map}, but the game started {map}. Saving keeps it on {map}.");
                     }
@@ -115,6 +171,21 @@ public sealed partial class BattleEditor : MonoBehaviour
         }
         var keys = Keyboard.current;
         if (keys == null) return;
+        if (keys.f9Key.wasPressedThisFrame)
+        {
+            if (recordingReplay != null) StopReplayCapture(true);
+            else if (previewing) StopPreview();
+            else if (editing) Leave(allowReturn: true);
+            else if (cinemaPlaying) { StopCinema("stopped"); ResumeEditor(); }
+            else ResumeEditor();
+            return;
+        }
+        if (recordingReplay != null)
+        {
+            if (Mouse.current is { } recordingMouse && recordingMouse.leftButton.wasPressedThisFrame
+                && OverPanel(recordingMouse.position.ReadValue())) Click(recordingMouse.position.ReadValue());
+            return;
+        }
         if (Mission.Banner != null && !editing)
         {
             if (Mouse.current is { } m && m.leftButton.wasPressedThisFrame) Click(m.position.ReadValue());
@@ -122,13 +193,8 @@ public sealed partial class BattleEditor : MonoBehaviour
         }
         if (cinemaPlaying)
         {
-            if (keys.escapeKey.wasPressedThisFrame || keys.f9Key.wasPressedThisFrame || keys.f10Key.wasPressedThisFrame) StopCinema("stopped");
+            if (keys.escapeKey.wasPressedThisFrame || keys.f10Key.wasPressedThisFrame) StopCinema("stopped");
             return;
-        }
-        if (keys.f9Key.wasPressedThisFrame && !commanding)
-        {
-            if (editing) Leave();
-            else if (Battle.Mode is { } mode) Enter(mode);
         }
         if (keys.f10Key.wasPressedThisFrame && !editing)
         {
@@ -147,8 +213,10 @@ public sealed partial class BattleEditor : MonoBehaviour
             if (!editing) return; // Play or Leave
         }
         if (previewing) { Preview(keys); return; }
-        if (typing != null) { Type(keys); return; }
+        if (typing != null) { if (!LimitTyping(keys)) Type(keys); return; }
         if (savedList != null) { if (keys.escapeKey.wasPressedThisFrame) savedList = null; return; } // waits for a pick
+        if (replayList != null) { if (keys.escapeKey.wasPressedThisFrame) replayList = null; return; }
+        if (tab == Tab.Cinema && mouse != null && CameraMoving(mouse, overPanel)) return;
         FlyCamera(keys, mouse, overPanel);
         EditKeys(keys);
         switch (tab)
@@ -159,6 +227,31 @@ public sealed partial class BattleEditor : MonoBehaviour
         }
     }
 
+    bool waitingForRestart;
+
+    void QueueRestartCompletion()
+    {
+        if (!Battle.RestartQueued || waitingForRestart) return;
+        waitingForRestart = true;
+        try { BepInEx.Unity.IL2CPP.Utils.MonoBehaviourExtensions.StartCoroutine(this, FinishRestartAtEndOfFrame()); }
+        catch { waitingForRestart = false; throw; }
+    }
+
+    System.Collections.IEnumerator FinishRestartAtEndOfFrame()
+    {
+        var endOfFrame = new WaitForEndOfFrame();
+        try
+        {
+            while (Battle.RestartQueued)
+            {
+                yield return endOfFrame;
+                Guard.Run("Battle restart", () => Battle.StepRestart(editing || commanding || view != null
+                    || hiddenRenderers.Count != 0 || gameInput.Count != 0 || hud.Count != 0 || fogs.Count != 0));
+            }
+        }
+        finally { waitingForRestart = false; }
+    }
+
     bool bannerHeld; // the game's controls are off for the mission's end banner (not the editor's or command view's)
 
     // The editor's three parts: placing tanks and their orders, the mission, the cinematic.
@@ -166,20 +259,55 @@ public sealed partial class BattleEditor : MonoBehaviour
     Tab tab;
 
     /// The Battle Editor's menu and the battle it's starting.
+    static string? mapLoadFailure;
+
     static void MenuLaunch()
     {
+        // Consume failure before a recovery carrier can briefly expose its native running battle.
+        // Its tanks are only initialized so the game's scene loader can safely return to the menu.
+        if (MapBridge.Call("TakeLoadFailure") is { } failure)
+        {
+            mapLoadFailure = failure;
+            Menu.Cancel();
+            NativeDesigner.AbortMapLoad();
+            instance?.PrepareSceneExit();
+            MainMenu.Uncover();
+        }
+        if (mapLoadFailure is { } reason)
+        {
+            if (instance != null) instance.replayToOpen = null;
+            MainMenu.Update();
+            if (Menu.HasCurrentCustomBattleButton && !Menu.Busy)
+            {
+                mapLoadFailure = null;
+                MainMenu.Open();
+                MainMenu.Tell(reason);
+            }
+            return;
+        }
         Menu.Step();
         MainMenu.Update();
+        instance?.ReplayMenuTick();
     }
 
     void SwitchTab(Tab to)
     {
+        if (file.Cinema?.Replay != null && to != Tab.Cinema) return;
+        if (!TryCommitPendingLimit()) return;
+        if (tab == Tab.Cinema) ClearCameraTools();
         tab = to; tool = Tool.Tanks; missionTool = MissionTool.None; drag = Drag.None; typing = null;
         Rebuild();
     }
 
     void Enter(DeathmatchGameMode mode)
     {
+        suspendedEditor.Clear();
+        if (MapBridge.Call("MapNotReadyReason", Battle.Map(mode)) is { } unavailable)
+        { Say(unavailable); return; }
+        if (!Battle.Spawned(mode)) { Say("The battle is still loading. Open the editor after its tanks are ready."); return; }
+        // An interrupted/repeated opening must restore the original renderer states before taking another snapshot.
+        if (editing) Leave();
+        else RestoreTanks();
         if (cinemaPlaying) StopCinema("the editor opened");
         Mission.Stop();
         Puppet.ReleaseAll();
@@ -188,30 +316,51 @@ public sealed partial class BattleEditor : MonoBehaviour
         timeScaleBefore = Time.timeScale;
         Time.timeScale = 0; // the battle waits
         OpenView();
-        // The battle's own tanks out of the way, deep under the map (switched off, the game still draws their track
-        // belts and plays their sound): the map starts empty, only the markers show. Looking down on where they were,
-        // high enough to see both teams' ground.
+        MuteNativeAudio();
+        // Only hide the battle's tank renderers: moving a live tank invalidates the tracks' cached world-space state.
+        // Its bodies and colliders stay at their native poses while the frozen map shows only the editor's markers.
         var tanks = Battle.Tanks(mode);
         topView = TopView(tanks.Select(t => t.transform.position).ToList(), view!.transform.position);
-        movedTanks.Clear();
         foreach (var t in tanks)
         {
-            movedTanks.Add((t.transform, t.transform.position, t.transform.rotation));
-            Put(t.transform, t.transform.position + Vector3.down * 1000, t.transform.rotation);
+            HideInstancedBelts(t);
+            foreach (var renderer in VehicleVisualRenderers(t))
+            {
+                if (renderer == null) continue;
+                if (hiddenRenderers.TryAdd(renderer.Pointer, (renderer, renderer.enabled, renderer.forceRenderingOff)))
+                { renderer.forceRenderingOff = true; renderer.enabled = false; }
+            }
         }
-        Physics.SyncTransforms();
         allDesigns = Files.Designs();
         ShowFaction();
-        // A new battle starts empty (Load saved brings the saved one back); back in the same one (after Play, or F9 and
-        // F9 again), what's placed stays.
-        if (file.Map != map || mode.GetInstanceID() != editedBattle) file = new BattleFile { Map = map };
+        // A new battle starts empty (Load saved brings the saved one back); returning to the same editor keeps placements.
+        if (file.Map != map || mode.GetInstanceID() != editedBattle || file.Units.Count == 0)
+        {
+            if (Battle.Playing != null && Battle.Playing.Map == map && Battle.Playing.Units.Count > 0)
+                file = Battle.Playing;
+            else if (file.Map != map || mode.GetInstanceID() != editedBattle)
+                file = new BattleFile { Map = map };
+        }
         editedBattle = mode.GetInstanceID();
         selected = null;
         Rebuild();
         ToTopView();
-        Trace.Write($"editor open on '{map}': {file.Units.Count} tanks placed, {movedTanks.Count} of the battle's moved away, {designs.Count} designs, " +
+        Trace.Write($"editor open on '{map}': {file.Units.Count} tanks placed, {tanks.Count} of the battle's hidden ({hiddenRenderers.Count} renderers), {designs.Count} designs, " +
                     $"{gameInput.Count} game controls, {hud.Count} HUD canvases, {fogs.Count} fogs off, camera over {topView.At} at {topView.Height:0} m");
         Say($"Battle Editor on {map}. Click the ground to place a tank, F9 to leave.");
+    }
+
+    internal void SwitchToEditMode()
+    {
+        if (editing) return;
+        if (Gauntlet.IsCurrent(Battle.Playing)) return;
+        Mission.Dismiss();
+        if (commanding) StopCommand();
+        if (Battle.Mode is { } mode)
+        {
+            Enter(mode);
+            Say($"Editing {BattleName}.");
+        }
     }
 
     /// The view from above, for the editor and the command view: its own camera instead of the game's (set up as the
@@ -220,6 +369,7 @@ public sealed partial class BattleEditor : MonoBehaviour
     /// it all back.
     void OpenView(bool cinematic = false)
     {
+        viewScene = Battle.Mode?.gameObject.scene;
         gameCamera = Camera.main;
         view = new GameObject("Battle Editor camera").AddComponent<Camera>();
         if (gameCamera != null)
@@ -260,13 +410,16 @@ public sealed partial class BattleEditor : MonoBehaviour
         if (gameCamera != null) gameCamera.enabled = true;
         if (view != null) Destroy(view.gameObject);
         view = null;
+        viewScene = null;
         Cursor.lockState = lockBefore; Cursor.visible = cursorBefore;
     }
 
-    static void Put(Transform tank, Vector3 at, Quaternion turn)
+    void RestoreTanks()
     {
-        tank.SetPositionAndRotation(at, turn);
-        foreach (var body in tank.GetComponentsInChildren<Rigidbody>()) { body.velocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+        RestoreInstancedBelts();
+        foreach (var (renderer, enabled, renderingOff) in hiddenRenderers.Values)
+            if (renderer != null) { renderer.enabled = enabled; renderer.forceRenderingOff = renderingOff; }
+        hiddenRenderers.Clear();
     }
 
     /// The mouse pointer, which the game hides and locks every frame while you're in a tank: shown again every frame,
@@ -305,7 +458,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         // the editor (EditKeys), the command view (CommandUpdate) and under the mission's end banner. Off while Esc puts
         // down a tool, a pick, a name being typed, a preview, a selection or a tank under your control. (Switching the
         // game's pause key off and on again is the likely cause of a crash on leaving a battle for the main menu.)
-        bool escPauses = editing ? typing == null && !previewing && savedList == null && tool == Tool.Tanks && missionTool == MissionTool.None && keyPick == KeyPick.None
+        bool escPauses = editing ? typing == null && !previewing && savedList == null && replayList == null && tool == Tool.Tanks && missionTool == MissionTool.None && keyPick == KeyPick.None
                        : commanding ? chosen.Count == 0 && puppet == null
                        : true;
         var on = InputSystem.ListEnabledActions();
@@ -317,9 +470,9 @@ public sealed partial class BattleEditor : MonoBehaviour
         if (escPauses) foreach (var a in gameInput) if (a != null && a.name == "TogglePause" && !a.enabled) a.Enable();
     }
 
-    /// On the Custom Battle screen opened by the Battle Editor button: a team with no tanks gets one of your designs
+    /// On the Custom Battle screen opened by the Battle Editor button: a team with no tanks gets a validated loading tank
     /// (the screen won't start without), written into the battle setup the screen checks. Checked twice a second while
-    /// the screen is up, as the screen sets its teams up after it shows. The tank is moved out of the way in the editor.
+    /// the screen is up, as the screen sets its teams up after it shows. The tank is hidden in the editor.
     void FillTeams()
     {
         if (Time.unscaledTime < nextFill) return;
@@ -327,24 +480,26 @@ public sealed partial class BattleEditor : MonoBehaviour
         var edit = FindObjectOfType<Sprocket.CustomBattles.CustomBattleCreation>()?.ConfigEdit;
         var teams = edit?.Config?.Teams;
         if (edit == null || teams == null) return;
-        if (allDesigns.Count == 0) allDesigns = Files.Designs();
-        if (allDesigns.Count == 0) return;
+        if (!teams.Any(t => t != null && t.UnitCount == 0)) return;
+        if (Battle.LoadingVehicle() is not { } loading)
+        { Say("No usable loading tank found. Check game files or fix a design's tracks before opening the editor."); return; }
         int filled = 0;
         for (int t = 0; t < teams.Length; t++)
-            if (teams[t] != null && teams[t].UnitCount == 0 && Battle.UnitFor(allDesigns[0].Path) is { } unit)
+            if (teams[t] != null && teams[t].UnitCount == 0)
             {
-                teams[t].Units.Add(unit, new Sprocket.CustomBattles.UnitInstanceInfo { Count = 1 });
+                teams[t].Units.Add(loading.Unit, new Sprocket.CustomBattles.UnitInstanceInfo { Count = 1 });
                 filled++;
             }
         if (filled == 0) return;
         edit.RaiseDirtyFlags(Sprocket.CustomBattles.BattleConfigDirtyFlags.Everything);
-        Trace.Write($"setup screen: {filled} empty teams given a {allDesigns[0].Name} so the battle can start");
-        Say($"Battle Editor: empty teams got a {allDesigns[0].Name} so the battle can start. Pick the map and start; it won't be in your battle.");
+        Trace.Write($"setup screen: {filled} empty teams given validated loading vehicle {loading.Path}");
+        Say($"Battle Editor: empty teams got a temporary loading tank. Pick the map and start; it won't be in your battle.");
     }
 
     /// Straight down over the middle of `spots`, high enough to see them all (over `fallback` if there are none).
     static (Vector3 At, float Height) TopView(List<Vector3> spots, Vector3 fallback)
     {
+        spots = spots.Where(p => float.IsFinite(p.x) && float.IsFinite(p.y) && float.IsFinite(p.z)).ToList(); // a tank thrown out of the world
         if (spots.Count == 0) return (fallback, 150);
         var middle = spots.Aggregate(Vector3.zero, (s, p) => s + p) / spots.Count;
         float spread = spots.Max(p => Vector3.Distance(new Vector3(p.x, middle.y, p.z), middle));
@@ -370,8 +525,15 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     float pausing = -1; // left for the pause menu: when, until it shows (the battle stays still meanwhile)
 
-    void Leave(bool forPause = false)
+    void Leave(bool forPause = false, bool allowReturn = false)
     {
+        if ((forPause || allowReturn) && Battle.Mode is { } owner)
+        {
+            suspendedEditor.Suspend(owner.GetInstanceID(), owner.gameObject.scene.handle, timeScaleBefore);
+            suspendedView = view != null ? (view.transform.position, view.transform.rotation, view.fieldOfView) : null;
+        }
+        else { suspendedEditor.Clear(); suspendedView = null; }
+        CancelLimitTyping();
         editing = false;
         tool = Tool.Tanks;
         drag = Drag.None;
@@ -382,12 +544,15 @@ public sealed partial class BattleEditor : MonoBehaviour
         ClearMarks();
         pickable.Clear();
         previewing = false; typing = null;
-        foreach (var (tank, at, turn) in movedTanks) if (tank != null) Put(tank, at, turn);
-        movedTanks.Clear();
-        Physics.SyncTransforms();
+        ClearCameraTools();
+        replayList = null;
+        ClearReplayVisuals();
+        RestoreTanks();
+        RestoreNativeAudio();
         CloseView();
         if (forPause) pausing = Time.unscaledTime; // the pause menu keeps the battle still and starts it again itself
         else Time.timeScale = timeScaleBefore;
+        Trace.Write($"editor closed at frame {Time.frameCount}, physics time {Time.fixedTime:0.000}: native visibility, controls and camera restored");
         Plugin.ModLog.LogInfo("EDITOR closed");
     }
 
@@ -447,13 +612,13 @@ public sealed partial class BattleEditor : MonoBehaviour
     void EditKeys(Keyboard keys)
     {
         bool shift = keys.shiftKey.isPressed, ctrl = keys.ctrlKey.isPressed;
-        if (keys.tabKey.wasPressedThisFrame && designs.Count > 0) PickDesign((design + (shift ? designs.Count - 1 : 1)) % designs.Count);
-        if (keys.digit1Key.wasPressedThisFrame) team = 0;
-        if (keys.digit2Key.wasPressedThisFrame) team = 1;
-        if (keys.qKey.wasPressedThisFrame) { if (tab == Tab.Mission) TurnObstacle(shift ? -1 : -15); else Turn(shift ? -1 : -15); }
-        if (keys.eKey.wasPressedThisFrame) { if (tab == Tab.Mission) TurnObstacle(shift ? 1 : 15); else Turn(shift ? 1 : 15); }
+        if (file.Cinema?.Replay == null && keys.tabKey.wasPressedThisFrame && designs.Count > 0) PickDesign((design + (shift ? designs.Count - 1 : 1)) % designs.Count);
+        if (file.Cinema?.Replay == null && keys.digit1Key.wasPressedThisFrame) team = 0;
+        if (file.Cinema?.Replay == null && keys.digit2Key.wasPressedThisFrame) team = 1;
+        if (file.Cinema?.Replay == null && keys.qKey.wasPressedThisFrame) { if (tab == Tab.Mission) TurnObstacle(shift ? -1 : -15); else Turn(shift ? -1 : -15); }
+        if (file.Cinema?.Replay == null && keys.eKey.wasPressedThisFrame) { if (tab == Tab.Mission) TurnObstacle(shift ? 1 : 15); else Turn(shift ? 1 : 15); }
         if (keys.deleteKey.wasPressedThisFrame || keys.backspaceKey.wasPressedThisFrame) { if (tab == Tab.Mission) RemoveMissionPick(); else if (tab == Tab.Cinema) DeleteKey(); else Remove(); }
-        if (keys.pKey.wasPressedThisFrame) Drive();
+        if (file.Cinema?.Replay == null && keys.pKey.wasPressedThisFrame) Drive();
         if (ctrl && keys.sKey.wasPressedThisFrame) Save();
         if (ctrl && keys.lKey.wasPressedThisFrame) LoadSaved();
         if (keys.tKey.wasPressedThisFrame) ToTopView();
@@ -490,6 +655,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         {
             case Drag.Move when Vector3.Distance(to, at) > 0.2f:
                 selected.Position = Files.Array(to);
+                selected.AtSpawn = false;
                 Place(selected);
                 DrawLines();
                 break;
@@ -519,7 +685,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         {
             tool = Tool.Tanks;
             if (hit is not { Part: Part.Body, Unit: { } enemy } || enemy == selected) Say("No target picked.");
-            else if (enemy.Team == selected.Team) Say($"{enemy.Id} is on the same team: pick a tank of the other team.");
+            else if (!file.FreeForAll && enemy.Team == selected.Team) Say($"{enemy.Id} is on the same team: pick a tank of the other team.");
             else
             {
                 selected.SetTarget(enemy.Id, selected.Attack?.Engage ?? "stopToFire");
@@ -562,7 +728,7 @@ public sealed partial class BattleEditor : MonoBehaviour
     {
         if (selected == null) return;
         tool = tool == Tool.Target ? Tool.Tanks : Tool.Target;
-        if (tool == Tool.Target) Say($"Main target for {selected.Id}: click a tank of the other team.");
+        if (tool == Tool.Target) Say($"Main target for {selected.Id}: click {(file.FreeForAll ? "any other tank" : "a tank of the other team")}.");
     }
 
     /// The factions to pick designs from: all of them, then each in the list's order (yours first, the game's last).
@@ -627,19 +793,23 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     void LoadSaved()
     {
-        savedList = Files.SavedBattles().Where(b => string.Equals(b.Battle.Map, map, StringComparison.OrdinalIgnoreCase))
+        CancelLimitTyping();
+        replayList = null;
+        bool replayEdits = file.Cinema?.Replay != null;
+        savedList = Files.SavedBattles().Where(b => !b.Battle.Locked && string.Equals(b.Battle.Map, map, StringComparison.OrdinalIgnoreCase))
+            .Where(b => (b.Battle.Cinema?.Replay != null) == replayEdits)
             .Select(b => (b.Battle, File.GetLastWriteTime(b.Path).ToString("d MMM HH:mm"))).ToList();
         savedTop = 0;
-        if (savedList.Count == 0) { savedList = null; Say($"No battles saved on {map} yet (Save makes one)."); }
+        if (savedList.Count == 0) { savedList = null; Say(replayEdits ? "No saved replay edits on this map yet." : $"No battles saved on {map} yet (Save makes one)."); }
     }
 
     void LoadBattle(BattleFile saved)
     {
+        CancelLimitTyping();
         savedList = null;
-        file = saved;
-        Select(null);
-        ToTopView();
-        Say($"Loaded {BattleName}: {file.Units.Count} tanks");
+        if (saved.Cinema?.Replay == null) replayReturn = null;
+        SetEditorFile(saved, tab);
+        Say(file.Cinema?.Replay != null ? $"Loaded replay edits: {BattleName}." : $"Loaded {BattleName}: {file.Units.Count} tanks");
     }
 
     /// The saved battles on this map, newest first, over everything else until one is picked or it's closed.
@@ -658,7 +828,8 @@ public sealed partial class BattleEditor : MonoBehaviour
             var (b, when) = list[i];
             int rules = b.Mission?.Rules.Count ?? 0;
             string extra = (rules > 0 ? $", {rules} rules" : "") + (b.Cinema?.Cameras.Count > 0 ? ", cinematic" : "");
-            Button(Line(0, w), $"{Short(b.Name, 34)}    {b.Units.Count(u => u.Team == 0)} vs {b.Units.Count(u => u.Team == 1)}{extra}    {when}", () => LoadBattle(b));
+            string lineup = b.FreeForAll ? $"FFA, {b.Units.Count} tanks" : $"{b.Units.Count(u => u.Team == 0)} vs {b.Units.Count(u => u.Team == 1)}";
+            Button(Line(0, w), $"{Short(b.Name, 34)}    {lineup}{extra}    {when}", () => LoadBattle(b));
         }
         scrollers.Add((box, by => savedTop = Math.Clamp(savedTop - by, 0, Math.Max(0, list.Count - rows))));
         y = box.y + box.height - Row - Pad;
@@ -688,7 +859,9 @@ public sealed partial class BattleEditor : MonoBehaviour
         foreach (var h in Physics.RaycastAll(ray, 5000).OrderBy(h => h.distance))
         {
             if (h.collider == null || pickable.ContainsKey(h.collider.gameObject.Pointer)) continue;
+            if (h.collider.attachedRigidbody != null) continue;
             if (h.collider.GetComponentInParent<Sprocket.Vehicles.VehicleObject>() != null) continue;
+            if (h.collider.GetComponentInParent<Sprocket.Vehicles.VehicleBehaviour>() != null) continue;
             return h.point;
         }
         return null;
@@ -699,8 +872,9 @@ public sealed partial class BattleEditor : MonoBehaviour
         foreach (var (_, root) in markers) Drop(root);
         markers.Clear();
         pickable.Clear();
-        foreach (var unit in file.Units) markers.Add((unit, Marker(unit)));
-        DrawLines();
+        if (!ReplayMarkers()) foreach (var unit in file.Units) markers.Add((unit, Marker(unit)));
+        if (file.Cinema?.Replay == null) DrawLines();
+        else { foreach (var o in lines) Drop(o); lines.Clear(); }
         ClearMarks();
         if (tab == Tab.Mission) MissionMarks();
         if (tab == Tab.Cinema) CinemaMarks();
@@ -847,10 +1021,12 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     void Save()
     {
+        if (!TryCommitPendingLimit()) return;
+        file.FreeForAllSpawns = null; // An edited battle always keeps its placed spawn positions.
         file.Map = map;
         if (string.IsNullOrWhiteSpace(file.Name)) file.Name = map;
         Directory.CreateDirectory(Files.Battles);
-        File.WriteAllText(PathFor(file.Name), file.ToJson());
+        SavedFiles.Write(PathFor(file.Name), file.ToJson());
         Trace.Write($"editor saved {PathFor(file.Name)}: {file.Units.Count} tanks");
         Say("Saved: " + PathFor(file.Name));
     }
@@ -858,13 +1034,34 @@ public sealed partial class BattleEditor : MonoBehaviour
     /// Save, then play: the battle restarts with these tanks where they were placed.
     void Play()
     {
-        if (file.Units.Count == 0) { Say("Place some tanks first."); return; }
-        if (file.Units.All(u => u.Reserve)) { Say("Every tank is a reserve: at least one has to start on the map."); return; }
+        if (file.Cinema?.Replay != null) { Save(); StartPreview(); return; }
+        Trace.Write($"editor play requested '{BattleName}' on {map}: {file.Units.Count} tanks");
+        void Stop(string reason)
+        {
+            Trace.Write($"editor play stopped: {reason}");
+            Say(reason);
+        }
+        if (!TryCommitPendingLimit())
+        {
+            Trace.Write("editor play stopped: a tank limit needs a valid value");
+            return;
+        }
+        if (file.Units.Count == 0) { Stop("Place some tanks first."); return; }
+        if (file.Units.All(u => u.Reserve)) { Stop("Every tank is a reserve: at least one has to start on the map."); return; }
+        file.FreeForAllSpawns = null; // Also discard inherited launcher settings before validation.
+        if (Battle.CannotPlay(file) is { } why) { Stop(why); return; }
         var mode = Battle.Mode;
-        if (mode == null) { Say("The battle is gone."); return; }
+        if (mode == null) { Stop("The battle is gone."); return; }
         Save();
-        Leave();
-        Say(Battle.Play(mode, file) ?? "Playing: the tanks go where you placed them once they're in. F9 edits again.");
+        // Prepare the native spawn plan while the editor keeps the map frozen. A rejected plan must leave the
+        // editor visible instead of resuming the loading bridge's tanks at their default positions.
+        if (Battle.Play(mode, file) is { } error) { Stop(error); return; }
+        Trace.Write($"editor play accepted '{BattleName}': native positions prepared before physics");
+        var returnScene = mode.gameObject.scene.handle;
+        float returnSpeed = timeScaleBefore;
+        Leave(allowReturn: true);
+        pendingPlayReturn = (file, returnScene, returnSpeed, Time.unscaledTime);
+        Say("Playing: F9 returns to this editor. F10 opens commands.");
     }
 
     // ---------- on screen ----------
@@ -872,56 +1069,11 @@ public sealed partial class BattleEditor : MonoBehaviour
     // The panels: the editor's own (left), the selected tank's or the tab's (right). Clicks on them don't reach the map.
     const float Row = 26, Pad = 8;
     int listTop;
-    static int ListRows => Math.Clamp((int)((Screen.height - 56 - 10 * Row - 40) / Row), 4, 16);
-    static Rect MainPanel => new(16, 56, 480, (8 + ListRows) * Row + 2 * Pad);
-    static Rect ListArea => new(16 + Pad, 56 + Pad + 5 * Row, 480 - 2 * Pad, ListRows * Row);
-    static Rect SelectedPanel => new(Screen.width - 16 - 360, 56, 360, 11 * Row + 2 * Pad);
-    Rect PicksArea => new(Screen.width - 16 - 360, selected == null ? 56 : SelectedPanel.yMax + 8, 360, 5 * Row + 2 * Pad);
+    static int ListRows => Math.Clamp((int)((Screen.height - 56 - 11 * Row - 40) / Row), 4, 16);
+    static Rect MainPanel => new(16, 56, 480, (9 + ListRows) * Row + 2 * Pad);
+    static Rect ListArea => new(16 + Pad, 56 + Pad + 6 * Row, 480 - 2 * Pad, ListRows * Row);
+    static Rect SelectedPanel => new(Screen.width - 16 - 360, 56, 360, 15 * Row + 2 * Pad);
     static readonly Color PickColour = new(0.2f, 0.85f, 0.95f);
-
-    // ---------- the player's picks ----------
-
-    // The budgets the game's own Custom Battle screen offers, and costs a tank might be held to (0: no limit).
-    static readonly int[] Budgets = { 0, 12000, 40000, 75000, 125000, 250000, 500000 };
-    static readonly int[] TankCosts = { 0, 10000, 20000, 30000, 40000, 50000, 75000, 100000, 150000 };
-
-    static int Next(int[] values, int now, int by) => values[(Math.Max(0, Array.IndexOf(values, now)) + by + values.Length) % values.Length];
-
-    /// How many tanks the player brings (Team 1's marked Pick) and the limits on them: a budget for all of them, a cost
-    /// for each, and a run of eras (the game's, custom ones too).
-    void PicksPanel()
-    {
-        var limits = file.Limits ??= new PickLimits();
-        var box = Panel(PicksArea);
-        float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
-        Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
-        int count = file.Slots.Count;
-        GUI.Label(Line(0, w), $"At Play the player picks {count} tank{(count == 1 ? "" : "s")} (the cyan ones), with:");
-        y += Row;
-        void Stepper(string label, string value, Action<int> step)
-        {
-            GUI.Label(Line(0, 106), label);
-            Button(Line(106, 26), "<", () => step(-1));
-            Button(Line(136, w - 166), value, () => step(1));
-            Button(Line(w - 26, 26), ">", () => step(1));
-            y += Row;
-        }
-        Stepper("Budget:", limits.Budget > 0 ? $"{limits.Budget:N0} in all" : "no limit", by => limits.Budget = Next(Budgets, limits.Budget, by));
-        Stepper("Each tank:", limits.MaxCost > 0 ? $"{limits.MaxCost:N0} at most" : "no limit", by => limits.MaxCost = Next(TankCosts, limits.MaxCost, by));
-        // The eras as a run, from one to another (-1: either end open).
-        var names = Files.EraList().Select(e => e.Name).ToList();
-        int from = limits.Eras.Count == 0 ? -1 : names.IndexOf(limits.Eras[0]), to = limits.Eras.Count == 0 ? -1 : names.IndexOf(limits.Eras[^1]);
-        int Cycle(int i, int by) => (i + 1 + by + names.Count + 1) % (names.Count + 1) - 1;
-        void Eras(int f, int t)
-        {
-            if (f < 0 && t < 0) { limits.Eras = new(); return; }
-            int lo = f < 0 ? 0 : f, hi = t < 0 ? names.Count - 1 : t;
-            if (lo > hi) (lo, hi) = (hi, lo);
-            limits.Eras = names.GetRange(lo, hi - lo + 1);
-        }
-        Stepper("Eras from:", from < 0 ? "any" : names[from], by => Eras(Cycle(from, by), to));
-        Stepper("Eras to:", to < 0 ? "any" : names[to], by => Eras(from, Cycle(to, by)));
-    }
 
     static bool Inside(Rect r, Vector2 p) => p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
 
@@ -950,12 +1102,13 @@ public sealed partial class BattleEditor : MonoBehaviour
     {
         if (pointerHidden && Cursor.visible) Cursor.visible = false; // photo mode: last thing in the frame
         if (cinemaPlaying) { if (Cursor.visible) Cursor.visible = false; return; } // nothing over the shot
-        if (!editing && !commanding && Time.unscaledTime > statusUntil && Mission.Messages.Count == 0 && Mission.Banner == null) return;
+        if (!editing && !commanding && recordingReplay == null && Time.unscaledTime > statusUntil && Mission.Messages.Count == 0 && Mission.Banner == null) return;
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         panelsDrawn.Clear(); scrollers.Clear(); sliders.Clear();
         if (editing) { ShowCursor(); Guard.Run("Battle editor panels", Panels); }
         if (commanding) { ShowCursor(); Guard.Run("Command view panels", CommandPanels); }
         if (!editing) Guard.Run("mission overlay", MissionOverlay);
+        if (recordingReplay != null) ReplayRecordingPanel();
         if (Time.unscaledTime < statusUntil) GUI.Box(new Rect((Screen.width - 700) / 2f, 20, 700, 28), status);
         modTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
     }
@@ -980,13 +1133,26 @@ public sealed partial class BattleEditor : MonoBehaviour
         buttons.Clear();
         if (previewing) { PreviewPanel(); return; }
         if (savedList != null) { SavedPanel(); return; }
+        if (replayList != null) { ReplayListPanel(); return; }
         var tabs = new Rect(16, 56 - Row - 4, 480, Row);
+        if (file.Cinema?.Replay != null)
+        {
+            GUI.Label(tabs, $"REPLAY EDITOR · {Short(BattleName, 42)}");
+            panelsDrawn.Add(tabs);
+            CinemaPanels();
+            return;
+        }
         float third = (tabs.width - 8) / 3;
         Toggle(new Rect(tabs.x, tabs.y, third, Row - 3), tab == Tab.Tanks, " Tanks", () => SwitchTab(Tab.Tanks));
         Toggle(new Rect(tabs.x + third + 4, tabs.y, third, Row - 3), tab == Tab.Mission, " Mission", () => SwitchTab(Tab.Mission));
-        Toggle(new Rect(tabs.x + 2 * (third + 4), tabs.y, third, Row - 3), tab == Tab.Cinema, " Cinematic", () => SwitchTab(Tab.Cinema));
+        Toggle(new Rect(tabs.x + 2 * (third + 4), tabs.y, third, Row - 3), tab == Tab.Cinema, " Cinematic setup", () => SwitchTab(Tab.Cinema));
         panelsDrawn.Add(tabs);
-        if (tab == Tab.Mission) { MissionPanels(); return; }
+        if (tab == Tab.Mission)
+        {
+            if (MissionLimitsPanel()) RulesPanel();
+            else MissionPanels();
+            return;
+        }
         if (tab == Tab.Cinema) { CinemaPanels(); return; }
         // Names over the tanks, and the picked tank's path points numbered.
         void Tag(Vector3 at, string text)
@@ -1020,14 +1186,23 @@ public sealed partial class BattleEditor : MonoBehaviour
         var box = Panel(MainPanel);
         float x = box.x + Pad, w = box.width - 2 * Pad, y = box.y + Pad;
         Rect Line(float left, float width) => new(x + left, y, width, Row - 3);
-        GUI.Label(Line(0, w), $"Battle Editor: {Short(BattleName, 30)} on {map}        tanks {file.Units.Count(u => u.Team == 0)} vs {file.Units.Count(u => u.Team == 1)}");
+        GUI.Label(Line(0, w), $"{Short(BattleName, 25)} · {Short(map, 20)} · {file.Units.Count} tanks");
         y += Row;
         GUI.Label(Line(0, 60), "Name:");
         Button(Line(60, w - 60), typing == "name" ? file.Name + "_" : (string.IsNullOrEmpty(file.Name) ? "(click to name this battle)" : file.Name), () => StartTyping("name", file.Name, v => file.Name = v));
         y += Row;
+        GUI.Label(Line(0, 90), "Mode:");
+        Button(Line(90, w - 90), file.FreeForAll ? "Free for all: up to 8 tanks" : "Team battle: blue vs red", () =>
+        {
+            file.FreeForAll = !file.FreeForAll;
+            Say(file.FreeForAll ? "Free for all: every tank is an enemy, up to 8 tanks. Keep a tank in each spawn group; blue and red only group placement and player positions. Save keeps this mode."
+                : "Team battle: tanks on the same team are allies. Save keeps this mode.");
+            Rebuild();
+        });
+        y += Row;
         GUI.Label(Line(0, 90), "Next tank:");
-        Toggle(Line(90, 150), team == 0, " Team 1 (blue)", () => team = 0);
-        Toggle(Line(250, 150), team == 1, " Team 2 (red)", () => team = 1);
+        Toggle(Line(90, 150), team == 0, file.FreeForAll ? " Blue spawn group" : " Team 1 (blue)", () => team = 0);
+        Toggle(Line(250, 150), team == 1, file.FreeForAll ? " Red spawn group" : " Team 2 (red)", () => team = 1);
         y += Row;
         if (allDesigns.Count == 0) GUI.Label(Line(0, w - 130), "No designs in My Games\\Sprocket\\Factions");
         else
@@ -1069,14 +1244,13 @@ public sealed partial class BattleEditor : MonoBehaviour
         y += Row;
         GUI.Label(Line(0, w), "Right drag: look.  Middle drag: pan.  Wheel: zoom.  W A S D, R / F: fly.");
 
-        if (file.Slots.Count > 0) PicksPanel();
         var chosen = selected;
         if (chosen == null) return;
         box = Panel(SelectedPanel);
         x = box.x + Pad; w = box.width - 2 * Pad; y = box.y + Pad;
         GUI.Label(Line(0, w), $"Selected {chosen.Id}: {Short(System.IO.Path.GetFileNameWithoutExtension(chosen.Blueprint), 38)}");
         y += Row;
-        GUI.Label(Line(0, w), $"Team {chosen.Team + 1}, facing {chosen.Yaw:0}°, {(chosen.Control == "player" ? "you drive it" : "the AI drives it")}");
+        GUI.Label(Line(0, w), $"{(file.FreeForAll ? "Group" : "Team")} {chosen.Team + 1}, facing {chosen.Yaw:0}°, {(chosen.Control == "player" ? "you drive it" : "the AI drives it")}");
         y += Row;
         float q = (w - 3 * 4) / 4;
         Button(Line(0, q), "-15°", () => Turn(-15));
@@ -1085,8 +1259,8 @@ public sealed partial class BattleEditor : MonoBehaviour
         Button(Line(3 * (q + 4), q), "+15°", () => Turn(15));
         y += Row;
         float h = (w - 4) / 2;
-        Button(Line(0, h), "Team 1 (blue)", () => { chosen.Team = 0; Rebuild(); });
-        Button(Line(h + 4, h), "Team 2 (red)", () => { chosen.Team = 1; Rebuild(); });
+        Button(Line(0, h), file.FreeForAll ? "Blue spawn group" : "Team 1 (blue)", () => { chosen.Team = 0; Rebuild(); });
+        Button(Line(h + 4, h), file.FreeForAll ? "Red spawn group" : "Team 2 (red)", () => { chosen.Team = 1; Rebuild(); });
         y += Row;
         if (designs.Count > 0) Button(Line(0, w), "Make it: " + Short(designs[design].Name, 42), () => { chosen.Blueprint = designs[design].Path; Rebuild(); });
         y += Row;
@@ -1100,6 +1274,16 @@ public sealed partial class BattleEditor : MonoBehaviour
         if (chosen.Team == 0)
             Toggle(Line(0, w), chosen.Pick, " Player picks it: their own design here, at Play", () => { chosen.Pick = !chosen.Pick; Rebuild(); });
         else GUI.Label(Line(0, w), "(Only Team 1's tanks can be picked by the player.)");
+        y += Row;
+        // What its AI may do with the guns (not when you drive it).
+        Toggle(Line(0, h), !chosen.NoTurret, " Turret turns", () => chosen.NoTurret = !chosen.NoTurret);
+        Toggle(Line(h + 4, h), !chosen.NoFire, " Shoots", () => chosen.NoFire = !chosen.NoFire);
+        y += Row;
+        Toggle(Line(0, w), chosen.ForceStopped, " Hold position (Force stop)", () => chosen.ForceStopped = !chosen.ForceStopped);
+        y += Row;
+        GUI.Label(Line(0, w), "No AI movement; it can still aim and fire.");
+        y += Row;
+        GUI.Label(Line(0, w), "A new move or attack command releases it.");
         y += Row;
         // Orders: the path it drives, then its main target.
         GUI.Label(Line(0, 110), $"Path: {chosen.Path.Count} points");
@@ -1117,6 +1301,6 @@ public sealed partial class BattleEditor : MonoBehaviour
             Toggle(Line(110, 110), attack.Engage != "fireOnTheMove", " Stops to fire", () => attack.Engage = "stopToFire");
             Toggle(Line(224, w - 224), attack.Engage == "fireOnTheMove", " Fires moving", () => attack.Engage = "fireOnTheMove");
         }
-        else GUI.Label(Line(0, w), "Without a target it fights whatever it meets.");
+        else GUI.Label(Line(0, w), chosen.ForceStopped ? "Held in place; move or attack to release it." : chosen.Path.Count == 0 ? "No path: holds position and fires at enemies." : "Without a target it fights whatever it meets.");
     }
 }
