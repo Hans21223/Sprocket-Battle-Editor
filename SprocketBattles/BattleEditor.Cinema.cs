@@ -192,7 +192,7 @@ public sealed partial class BattleEditor
 
     void PreviewPanel()
     {
-        GUI.Box(new Rect(16, Screen.height - 46, 470, 30), $"Preview {previewAt:0.0} / {C.Length:0.0} s   (F9, Esc or click stops)");
+        GUI.Box(new Rect(16, Screen.height - 46, 470, 30), $"Preview {previewAt:0.0} / {C.Length:0.0} s   ({Plugin.EditorKey}, Esc or click stops)");
     }
 
     // ---------- the panels ----------
@@ -495,7 +495,7 @@ public sealed partial class BattleEditor
         Time.timeScale = cinemaTimeBefore > 0 ? cinemaTimeBefore : 1;
         Puppet.ReleaseAll();
         Trace.Write($"cinematic: {why}");
-        Say($"Cinematic {why}. F10 opens commands.");
+        Say($"Cinematic {why}. {Plugin.CommandKey} opens commands.");
     }
 
     void CinemaTick()

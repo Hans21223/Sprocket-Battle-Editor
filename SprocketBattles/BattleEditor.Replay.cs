@@ -80,7 +80,7 @@ public sealed partial class BattleEditor
             CaptureFrame(capture, 0);
             CaptureAudio(capture, 0);
             Trace.Write($"replay: recording '{battle.Name}', {capture.Actors.Count} tanks, {capture.Parts} visual parts");
-            Say("Recording replay. F9 stops, saves and opens it for cinematic editing.");
+            Say($"Recording replay. {Plugin.EditorKey} stops, saves and opens it for cinematic editing.");
         }
         catch { recordingReplay = null; throw; }
     }
@@ -219,7 +219,7 @@ public sealed partial class BattleEditor
         buttons.Clear();
         var box = Panel(new Rect((Screen.width - 540) / 2f, 16, 540, 2 * Row + 2 * Pad));
         GUI.Label(new Rect(box.x + Pad, box.y + Pad, 524, Row),
-            $"Recording replay: {recordingReplay!.Data.Duration:0.0} s. F9: stop & edit");
+            $"Recording replay: {recordingReplay!.Data.Duration:0.0} s. {Plugin.EditorKey}: stop & edit");
         Button(new Rect(box.x + Pad, box.y + Pad + Row, 258, Row - 3), "Stop & edit", () => StopReplayCapture(true));
         Button(new Rect(box.x + 274, box.y + Pad + Row, 258, Row - 3), "Stop & save", () => StopReplayCapture(false));
     }

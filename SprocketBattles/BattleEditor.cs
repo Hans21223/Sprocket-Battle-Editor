@@ -171,7 +171,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         }
         var keys = Keyboard.current;
         if (keys == null) return;
-        if (keys.f9Key.wasPressedThisFrame)
+        if (Plugin.EditorKeyDown(keys))
         {
             if (recordingReplay != null) StopReplayCapture(true);
             else if (previewing) StopPreview();
@@ -193,10 +193,10 @@ public sealed partial class BattleEditor : MonoBehaviour
         }
         if (cinemaPlaying)
         {
-            if (keys.escapeKey.wasPressedThisFrame || keys.f10Key.wasPressedThisFrame) StopCinema("stopped");
+            if (keys.escapeKey.wasPressedThisFrame || Plugin.CommandKeyDown(keys)) StopCinema("stopped");
             return;
         }
-        if (keys.f10Key.wasPressedThisFrame && !editing)
+        if (Plugin.CommandKeyDown(keys) && !editing)
         {
             if (commanding) StopCommand();
             else if (Battle.Mode is { } battle) StartCommand(battle);
@@ -347,7 +347,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         ToTopView();
         Trace.Write($"editor open on '{map}': {file.Units.Count} tanks placed, {tanks.Count} of the battle's hidden ({hiddenRenderers.Count} renderers), {designs.Count} designs, " +
                     $"{gameInput.Count} game controls, {hud.Count} HUD canvases, {fogs.Count} fogs off, camera over {topView.At} at {topView.Height:0} m");
-        Say($"Battle Editor on {map}. Click the ground to place a tank, F9 to leave.");
+        Say($"Battle Editor on {map}. Click the ground to place a tank, {Plugin.EditorKey} to leave.");
     }
 
     internal void SwitchToEditMode()
@@ -1061,7 +1061,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         float returnSpeed = timeScaleBefore;
         Leave(allowReturn: true);
         pendingPlayReturn = (file, returnScene, returnSpeed, Time.unscaledTime);
-        Say("Playing: F9 returns to this editor. F10 opens commands.");
+        Say($"Playing: {Plugin.EditorKey} returns to this editor. {Plugin.CommandKey} opens commands.");
     }
 
     // ---------- on screen ----------

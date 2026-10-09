@@ -1,4 +1,4 @@
-Sprocket Battle Editor 0.17.30 - for Sprocket 0.2.56.0 (Alpha)
+Sprocket Battle Editor 0.17.31 - for Sprocket 0.2.56.0 (Alpha)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 INSTALL
@@ -8,6 +8,7 @@ Ambush, The Crossroad, Silent Border, Sandbox and Sandbox (Low performance), or 
 
 Rebuilt against fresh Sprocket 0.2.56.0 interop. Offline regression, patch-target and native ABI checks pass.
 In-game testing remains pending. No game files or loader files are included.
+With the optional Sprocket Mod API installed, F9 and F10 can be rebound in its keybinding window.
 
 USE
 Open Edit battle from the main menu to create or load a battle. F10 opens the command view during a battle.

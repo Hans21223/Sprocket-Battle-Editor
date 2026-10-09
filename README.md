@@ -11,7 +11,7 @@ For **Sprocket 0.2.56.0** with the [Sprocket Mod Loader](https://github.com/Hans
 The 0.2.56.0 builds use newly generated game interop. All 29 Harmony patch targets, the native scene-loader ABI,
 23 game type contracts and the 22 offline regression suites pass. In-game testing remains pending.
 
-**0.17.30 includes Battle Editor 0.17.30 and Map Framework 0.4.1.** Map Framework makes Ambush,
+**0.17.31 includes Battle Editor 0.17.31 and Map Framework 0.4.1.** Map Framework makes Ambush,
 The Crossroad, Silent Border, Sandbox and Sandbox (Low performance) available to Custom Battle and Battle Editor.
 It repairs Ambush's team setup and builds the missing custom-battle setups on the other maps. The Sandbox thumbnails
 are included beside the Map Framework DLL.
@@ -26,8 +26,8 @@ Editor Save and Play use the tank positions you place. Random spawn settings bel
 With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../../releases). By hand: copy the ZIP's
 `BepInEx` folder into the Sprocket folder.
 
-Choose **Sprocket-Battle-Editor-and-Map-Framework-0.17.30.zip** for both plugins. Separate
-**Sprocket-Battle-Editor-0.17.30.zip** and **Sprocket-Map-Framework-0.4.1.zip** downloads are also available; the loader is installed
+Choose **Sprocket-Battle-Editor-and-Map-Framework-0.17.31.zip** for both plugins. Separate
+**Sprocket-Battle-Editor-0.17.31.zip** and **Sprocket-Map-Framework-0.4.1.zip** downloads are also available; the loader is installed
 separately. When updating, replace Battle Editor and remove any older extra copy of `SprocketMaps.dll` before copying
 the included `BepInEx\plugins\SprocketMaps` folder. Keep the two Sandbox PNGs beside that DLL.
 
@@ -245,6 +245,9 @@ Complete your selected 2 to 30 rounds to win. Losing your tank ends the run.
 | Editor | Esc | Cancel a tool, or leave for the pause menu |
 | Command view | Space, Esc | Pause; drop the selection, or leave for the pause menu |
 | Under force control | Arrow keys, mouse, G | Drive, aim, fire |
+
+With the optional [Sprocket Mod API](https://github.com/furryaxw/SprocketModAPI) installed, F9 and F10 can be rebound in its
+keybinding window (Settings > Keymapping > MOD KEYBINDINGS), and Battle Editor is listed in its Mod menu.
 
 ## Files
 

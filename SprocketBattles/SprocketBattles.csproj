@@ -2,6 +2,18 @@
   <Import Project="..\SprocketMod.props" />
   <PropertyGroup>
     <AssemblyName>SprocketBattles</AssemblyName>
-    <Version>0.17.30</Version>
+    <Version>0.17.31</Version>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Sprocket Mod API, optional at run time (ModApi.cs): compiled against the copy in lib\, never shipped with the mod. -->
+    <Reference Include="SprocketModAPI"><HintPath>..\lib\SprocketModAPI.dll</HintPath><Private>false</Private></Reference>
+    <!-- What the Mod API's Mod menu (and mod managers) show for this mod; the Id must never change. -->
+    <AssemblyMetadata Include="Sprocket.Mod.Id" Value="hans21223.battle-editor" />
+    <AssemblyMetadata Include="Sprocket.Mod.DisplayName" Value="Battle Editor" />
+    <AssemblyMetadata Include="Sprocket.Mod.Description" Value="Make your own battles on Sprocket's custom battle maps: tanks, missions, cinematics, command view." />
+    <AssemblyMetadata Include="Sprocket.Mod.Authors" Value="Hans21223" />
+    <AssemblyMetadata Include="Sprocket.Mod.Repository" Value="Hans21223/Sprocket-Battle-Editor" />
+    <AssemblyMetadata Include="Sprocket.Mod.Homepage" Value="https://github.com/Hans21223/Sprocket-Battle-Editor" />
+    <AssemblyMetadata Include="Sprocket.Mod.License" Value="MIT" />
+  </ItemGroup>
 </Project>

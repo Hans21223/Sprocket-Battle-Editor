@@ -36,7 +36,7 @@ public sealed partial class BattleEditor
         view.transform.SetPositionAndRotation(topView.At + Vector3.up * topView.Height, Quaternion.Euler(pitch, yaw, 0));
         nextLook = 0;
         Trace.Write($"command view open: {seen.Count} tanks, {seen.Count(Commandable)} take orders, {Battle.AICount} AIs");
-        Say("Command view: select any tanks with the left mouse button, right click to move or attack. Space pauses, F10 goes back.");
+        Say($"Command view: select any tanks with the left mouse button, right click to move or attack. Space pauses, {Plugin.CommandKey} goes back.");
     }
 
     void StopCommand(bool forPause = false)
@@ -416,7 +416,7 @@ public sealed partial class BattleEditor
         y += Row;
         GUI.Label(Line(0, w), Battle.Playing?.FreeForAll == true ? "Right click the ground: move. Right click any other tank: attack." : "Right click the ground: move. Right click an enemy tank: attack.");
         y += Row;
-        GUI.Label(Line(0, w), "Right drag: look. Middle drag: pan. Wheel: zoom. Space: pause. P: all lines. F10: back.");
+        GUI.Label(Line(0, w), $"Right drag: look. Middle drag: pan. Wheel: zoom. Space: pause. P: all lines. {Plugin.CommandKey}: back.");
         PuppetPanel();
     }
 }
