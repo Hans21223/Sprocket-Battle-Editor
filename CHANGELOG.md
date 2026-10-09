@@ -1,3 +1,13 @@
+# Battle Editor 0.17.31 + Map Framework 0.4.1 (Alpha)
+
+<!-- sp-compat {"hamish.sprocket": "0.2.56.0", "bepinex.bepinex": "6.0.0-be.788"} -->
+
+- Work with the **Sprocket Mod API** (furryaxw/SprocketModAPI) when it is installed, and as before without it:
+  Battle Editor appears in the API's Mod menu with its name and description, and its two keys, the editor (F9) and
+  the command view (F10), can be rebound in the API's keybinding window. Messages name the bound key.
+- The API is a soft dependency (mod ID `hans21223.battle-editor`); its DLL is only compiled against (lib/), not shipped.
+- Map Framework is unchanged at 0.4.1. Offline checks pass with and without the API; gameplay remains unverified.
+
 # Battle Editor 0.17.30 + Map Framework 0.4.1 (Alpha)
 
 <!-- sp-compat {"hamish.sprocket": "0.2.56.0", "bepinex.bepinex": "6.0.0-be.788"} -->

@@ -255,7 +255,7 @@ internal static partial class MainMenu
 
         // Bottom: back, and what the keys do in a battle.
         Btn(root, "BACK", 60, 1006, 200, 48, Close);
-        Text(root, "Edit battle opens the editor. In a battle: F10 opens commands and force control. Esc closes this menu.",
+        Text(root, $"Edit battle opens the editor. In a battle: {Plugin.CommandKey} opens commands and force control. Esc closes this menu.",
              300, 1016, 1560, 30, 17, Dim, TextAlignmentOptions.Right);
         if (Time.unscaledTime < noteUntil && note.Length > 0)
         {

@@ -1,8 +1,10 @@
-Sprocket Battle Editor 0.17.30 + Map Framework 0.4.1 - for Sprocket 0.2.56.0 (Alpha)
+Sprocket Battle Editor 0.17.31 + Map Framework 0.4.1 - for Sprocket 0.2.56.0 (Alpha)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 Rebuilt against fresh 0.2.56.0 game interop. Offline regression, patch-target and native ABI checks pass.
 In-game testing remains pending.
+0.17.31: with the optional Sprocket Mod API (github.com/furryaxw/SprocketModAPI) installed, F9 and F10 can be
+rebound in its keybinding window and Battle Editor is listed in its Mod menu. Without the API: no change.
 
 INSTALL
 Needs the Sprocket Mod Loader (BepInEx 6 IL2CPP). Add the zip in Sprocket Mod Manager, or copy its BepInEx folder into

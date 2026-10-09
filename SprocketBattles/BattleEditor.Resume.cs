@@ -22,14 +22,14 @@ public sealed partial class BattleEditor
         if (mode == null || !mode.gameObject.scene.isLoaded || !suspendedEditor.Matches(mode.GetInstanceID(), mode.gameObject.scene.handle))
         { suspendedEditor.Clear(); return; }
         if (Battle.RestartQueued || !Battle.Spawned(mode))
-        { Say("The battle is loading. Press F9 when its tanks are ready."); return; }
+        { Say($"The battle is loading. Press {Plugin.EditorKey} when its tanks are ready."); return; }
         if (commanding) StopCommand();
         var controller = UnityEngine.Object.FindObjectOfType<Sprocket.GameControl.GameController>();
         if (UnityEngine.SceneManagement.SceneManager.GetSceneByName("PauseMenu").isLoaded
             || controller != null && controller.PauseState != Sprocket.PauseState.Unpaused)
         {
             if (suspendedEditor.Waiting) return;
-            if (controller == null) { Say("Resume the pause menu, then press F9 to return to the editor."); return; }
+            if (controller == null) { Say($"Resume the pause menu, then press {Plugin.EditorKey} to return to the editor."); return; }
             // Native unpause is asynchronous. Let it finish before creating/hiding cameras and freezing again.
             controller.timescaleOnPause = suspendedEditor.Speed;
             if (controller.PauseState != Sprocket.PauseState.Unpausing) controller.Sprocket_IPauseHandler_RequestUnpause();
