@@ -1,4 +1,4 @@
-# Package explicit verified outputs, or rebuild against the requested game's current interop first.
+﻿# Package explicit verified outputs, or rebuild against the requested game's current interop first.
 param(
     [string]$OutputDirectory = '',
     [string]$BattleBuildDirectory = '',
@@ -61,6 +61,7 @@ $battlePayload = if ($needBattle) { [ordered]@{
 $mapPayload = if ($needMaps) { [ordered]@{
     'BepInEx/plugins/SprocketMaps/SprocketMaps.dll' = (Join-Path $MapBuildDirectory 'SprocketMaps.dll')
     'BepInEx/plugins/SprocketMaps/SharpCompress.dll' = (Join-Path $MapBuildDirectory 'SharpCompress.dll')
+    'BepInEx/plugins/SprocketMaps/sprocketmaps.shaders' = (Join-Path $repoRoot 'SprocketMaps/sprocketmaps.shaders')
     'BepInEx/plugins/SprocketMaps/SharpCompress-LICENSE.txt' = (Join-Path $releaseMaps 'SharpCompress-LICENSE.txt')
     'BepInEx/plugins/SprocketMaps/Sandbox.png' = (Join-Path $repoRoot 'SprocketMaps/Sandbox.png')
     'BepInEx/plugins/SprocketMaps/Sandbox (Low performance).png' = (Join-Path $repoRoot 'SprocketMaps/Sandbox (Low performance).png')

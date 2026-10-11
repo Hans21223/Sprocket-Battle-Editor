@@ -1,3 +1,197 @@
+# Battle Editor 0.17.32 (local)
+
+- The New battle map picker reads the map list again each time it opens. Before, the list was read once per
+  session, so a map Map Framework finished importing in the background (or any map added later) only appeared
+  after restarting Sprocket.
+- Tanks start on the surface nearest the height they were placed at, not the highest surface under their
+  footprint. A tank placed in a street beside a lamp post or tree was put on top of it and fell about 10 m (the
+  "tanks in the sky" in editor Play on Poland); indoors, tanks could start on the roof. Measured in game: the
+  Poland tank now starts at the normal 2.5 m drop height and settles on the street.
+
+# Map Framework 0.5.0 (local map test)
+
+- Garry's Mod maps import automatically: put a workshop addon (`.gma`) or a map (`.bsp`) in CustomMaps. Map
+  Framework converts it to an OBJ with its textures (SourceMaps.cs), which Unity then imports like any other, and
+  lists it under the map's own name (workshop addons are all called gmpublisher.gma):
+  - world brushes, brush entities, displacements, and props (static props and prop_* entities: MDL/VVD/VTX, LOD 0
+    of the default body, in their skin), placed by origin, angles and scale;
+  - materials and textures from the addon, the map's pak lump and Garry's Mod's content (its VPKs and loose files,
+    found in any Steam library through libraryfolders.vdf and the registry); VTF textures (DXT1/3/5 and the plain
+    formats) become PNGs. Alpha-tested materials are cut out, translucent ones see-through;
+  - tool and sky faces and the 3D skybox (the area of the leaf holding sky_camera) are left out; water becomes the
+    game's water; props under about 15 m across and physics props become breakables;
+  - LZMA-compressed lumps (later Source branches) are unpacked;
+  - texture file names are at most 60 characters (a short hash replaces the rest);
+  - 1 unit = 1 inch. Checked against the Python converter it was ported from: gm_construct and gm_sakura come out
+    identical (vertices, objects, materials; texture pixels within 1). gm_bigcity_improved_rp converts in 6.5 s and
+    passes the import with 16 tanks a side.
+
+- Maps keep their own lighting. A map with baked lightmaps or its own sky (a Unity scene, such as a night city) no
+  longer gets the carrier's daylight:
+  - exposure fixed at Unity's built-in brightness scale ("Map lighting exposure" under [Lighting] in the config,
+    default -0.263 EV100), so baked lamp light, emissive windows and dark ambient look as built;
+  - the map's real-time sun or moon drives the game's sun (direction, colour, intensity x pi lux); a baked-only sun,
+    or none, means no real-time sun;
+  - the sky: a gradient sky from the map's ambient colours (trilight, flat, or a procedural skybox's tint), which
+    also lights the scene; the map's fog; the game's clouds off;
+  - the map's light probes, registered again after the scene merge;
+  - the carrier's reflection probes are switched off. They hold its daylight, and at the map's exposure everything
+    inside them reflected it as glare (Sandbox's covers 750 x 2000 m up to 14 m high: Demo City's streets and
+    ground floors went white, rooftops stayed dark).
+  - no tonemapping and no bloom, as Unity's built-in renderer and URP's default profile draw: the game's ACES
+    darkened the night and greyed the lamps' warm light;
+  - baked spot and point lamps also shine in real time (no shadows) within "Real-time lamp distance" (config
+    [Lighting], default 150 m; 0 = baked only), so they light tanks and draw clear pools. The bake still holds
+    their light, so lit ground gets it twice (chosen over dark tanks). Area lights stay baked only. "Real-time lamp
+    brightness" (default 1, as authored) multiplies them: map lamps are often authored dim (Demo City's street lamps
+    are about 6 candela, 16-19 m up, so they barely reach the road even in Unity), and 4-10 makes them visibly light
+    streets and tanks;
+  - statically batched renderers get an identity lightmap scale/offset: their combined meshes already carry the
+    UVs scaled into the tile, and the tile was applied a second time, so each piece read one wrong texel (flat
+    blocks with hard edges, no lamp pools);
+  - screen-space global illumination off on lightmapped maps: the game's default profile turns it on, and in HDRP
+    it replaces lightmaps and light probes, so none of the baked lamp light showed;
+  - On a lightmapped map, the sun counts as real-time only when its bake record says so. Exported scenes often
+    lose that record (Demo City's baked moon read "not baked"), which added a real-time copy of the baked moon.
+- A lightmapped map is no longer merged into the carrier scene: the merge drops the map scene's lightmaps, so baked
+  light never showed (Demo City's lamp-lit streets were dark). It stays a scene of its own and is unloaded with the
+  battle. Maps without lightmaps are merged as before.
+- Map Framework's own shaders are kept loaded between maps. The scene change's unused-asset sweep destroyed them,
+  so the second map in a session was rejected ("Value cannot be null: shader"; Poland after Demo City).
+  Models without scene lighting (OBJ, FBX) and maps with an object named "Sprocket Game Lighting" keep the game's
+  lighting. The carrier's sun is restored when the map goes.
+- The map's ambient, sky and fog settings are recorded by the importer into the map's .json ("lighting") and read
+  from there; maps converted before get a dim neutral sky.
+- Lightmaps are left to Unity. Reading or setting LightmapSettings.lightmaps makes the runtime create LightmapData
+  objects, which crashes the mod runtime in this game build (access violation in coreclr; crash dumps 2026-10-10
+  20:48 and 20:58, both in the lightmap step). The interop's LightmapData is a plain class, so its array type does
+  not even load.
+- Automatic import:
+  - shorter cache folder names (a 32-character key, work folders with an 8-character id): the Unity project sits
+    below them, and Unity's scripts can't open paths over 260 characters. In the game's folder only about 40
+    characters were left for a file name, so gm_bigcity_improved_rp failed on its textures ("Could not find a part of
+    the path"). Maps cached before convert once more;
+  - progress shows only in the main menu; it sat over whole battles while a slow import ran. Short notices ("Map
+    imported") still show anywhere for 20 seconds;
+  - Unity converts at below-normal priority, so the game keeps the CPU while people play;
+  - a conversion clears the leftovers of one that a closed game interrupted (each a whole Unity project: 2.5 GB in
+    one folder), and once a new conversion is registered, older conversions of the same map are deleted.
+- The importer converts in linear colour with full-HDR lightmaps, as the game renders. Its throwaway Unity project
+  started in Unity's gamma default, which stored baked light gamma-encoded (value^(1/2.2)); the game read that as
+  linear, so dark areas came out up to 7x too bright and lamp pools flattened. Cached imports convert once more.
+- The shipped HDRP/Lit (sprocketmaps.shaders) gains emission-map variants for opaque and cut-out surfaces, and a
+  non-directional copy of every lightmapped keyword set (the game's own are all directional; imported Unity scenes
+  usually bake non-directional lightmaps).
+- Emission: a material's emission map now limits its glow to the map's texture (lit windows, signs) instead of the
+  whole surface glowing. The importer keeps a Standard or URP material's emission only when its _EMISSION keyword
+  is on, as Unity draws it; before, every material with a leftover emission colour glowed.
+- The extras (game water, destructible scenery, map lighting) are each guarded where they are called: a managed
+  failure, including an interop type that fails to load, costs only that extra, never the map.
+- Importer fixes found on ZENRIN's Akihabara sample (an Asset Store scene from 2014):
+  - legacy "Cutout" shaders are cut out and legacy "Transparent" ones see-through; a material whose own shader
+    wasn't copied (shaders are code) is cut out when it saved a cutoff value. Signs, fences and wires were solid;
+  - character and wheel colliders are removed: they move characters and cars, and navigation can't use them (the
+    import stopped at "Navigation did not collect every repaired solid collider");
+  - a flat mesh scaled 0 across itself (a quad ground at 150 x 150 x 0) gets 1 there: physics ignores colliders
+    with a zero scale, so the ground had no collision and start positions fit only on the city's own geometry;
+  - `-sprocketScale <k>` scales a whole scene about the origin (and its light ranges, reflection probes and
+    terrain) for scenery modelled smaller or larger than life. Akihabara is a 1/8.5 miniature (0.5 m cars).
+- An OBJ material with an alpha map (`map_d`) is cut out by its texture's alpha (grates, fences, foliage cards).
+- Map Framework's object names survive OBJ import: Unity's OBJ importer turns spaces in group names into
+  underscores, so "Sprocket Water Surface", "Sprocket Breakable", "Sprocket Tree", the spawn areas and "Sprocket Game
+  Lighting" were never recognised in OBJ maps (gm_construct's lake stayed a solid blue sheet). They're named back.
+- Breakables and trees no longer block the importer's tank navigation check, as they already didn't in the game:
+  a street full of parked bikes, cones and bins failed the import ("No safe connected tank formation pair").
+  Tanks may also start on them (they're shoved aside).
+- Starting positions fit town maps, both in the importer and in the check the game runs when the map loads (that
+  one still asked for 100 m and rejected gm_sakura's 97 m starts, which took the map off the list). The game's
+  check also sets breakables and trees aside while it looks, as the importer does: by then they are physics bodies
+  with their colliders on, and every bike and sign counted as a wall:
+  - the teams start 100 m apart, or half the map's width when it's smaller;
+  - each tank needs a clear tank-sized space (4 x 9 m along its facing) with level ground under its corners, instead
+    of an 8 m square whose corners also had to be on tank navigation. Navigation keeps a tank's radius from walls,
+    so in any street narrower than about 13 m no start was ever found;
+  - the first five rejected starts are logged with the reason (SPROCKET_MAP_SPAWN_REJECTED).
+
+# Map Framework 0.4.9 (local map test)
+
+- Destructible scenery, chosen by name in the map. Neither kind blocks tank navigation, so AI tanks drive through them.
+  - Trees bend and break under tanks with the game's own tree destruction. Trees drawn with the game's foliage (native
+    tree presets) and anything named "Sprocket Tree" (poles and posts too) get the game's DestructableTree, tuned like
+    the game's poplars for their height (mass and bend force from its five poplar prefabs; same bend curves), a thin
+    trunk collider like theirs and the game's tree layer (21). Only trees within 40 m of a tank run their physics; the
+    rest stay idle, as the game's terrain trees do. The game's leaf-fall effects are not loaded on custom maps, so
+    imported trees bend and break without them.
+  - Objects named "Sprocket Breakable" (fences, crates, barrels, wrecks) become physics bodies that sleep until a tank
+    hits them. A number after the name sets the mass in kilograms ("Sprocket Breakable 800"); otherwise it comes from
+    the object's size. Their mesh colliders become convex hulls (a box when a mesh isn't readable).
+- A "Sprocket Water Surface" plane is never solid: the importer gives it no collision (so spawns can't land on the
+  water) and Map Framework switches off any collider on it at load (for maps built before). Changing the importer
+  re-converts each automatically imported map once.
+
+# Map Framework 0.4.7 (local map test)
+
+- Game water for imported maps. A renderer named "Sprocket Water Surface" becomes the game's own water: an HDRP water
+  surface (the system Sandbox's ocean uses) over the plane's area at its height, with a volume that turns water
+  rendering on. If the current graphics settings have no water, or anything fails, the map's own plane stays.
+- Terrain grass and rocks: the materials of terrain detail prototypes (prefabs outside the scene hierarchy) are now
+  converted like scene materials, so native Sprocket grass draws with the game's foliage shader.
+
+# Map Framework 0.4.6 (local map test)
+
+- Ship Map Framework's own HDRP/Lit (sprocketmaps.shaders), compiled by the game's Unity 6000.3.21f1 / HDRP 17.3.0
+  with exactly the game's global keyword combinations (tools/ShaderBundle; checked by verify-bundle.py). The game's
+  copy only has the variants its own materials use, so imported cutouts, two-sided and transparent materials had
+  none. Imported materials now keep real alpha-test cut-outs with cut-out shadows, both sides and transparency.
+- Fallbacks when that file is missing: cutouts on the game's foliage shader, then the game's HDRP/Lit variants.
+- Load the shader file and its assets through the native calls: the interop's AssetBundle.LoadFromFile and
+  LoadAllAssets reference a span method this runtime lacks. The file is not named .bundle, which the map scan
+  would register as a map.
+- Verified in game on Poland (tools/InGameCheck): the shaders load, 46 cutouts and 1 transparent material use them,
+  and the scene renders correctly. Frame rate is unchanged (about 30 fps; the cost is the object count, which the
+  importer does not yet reduce).
+
+# Map Framework 0.4.5 (local map test)
+
+- Restore tagged native Sprocket foliage and bark materials using their original shader properties,
+  keywords and render queue when the installed game shader is available. Each restored material belongs
+  to the custom map session; unavailable native shaders retain the imported material fallback.
+- The private Poland authoring pass uses locally installed Sprocket ground textures and tree LODs,
+  and restores combined scenery from original vertex data before disabling mesh compression.
+  Native game assets remain private and are excluded from public source and releases.
+
+# Map Framework 0.4.4 (local map test)
+
+- Match the game's compiled shader variants. A player build only contains the HDRP/Lit variants its own
+  materials use, and Unity silently substitutes the nearest one: the game has no alpha-test or double-sided
+  variant, so cutout leaves, bushes, ivy and fences drew as solid dark cards. Cutout and transparent materials
+  now use the game's one transparent variant (parallax, with zero depth) and are drawn unculled without
+  shadows. Opaque materials always get a normal-and-mask keyword set the game has.
+- Set the HDRP terrain keywords the editor inspector normally sets. Imported terrains drew only their first
+  four layers without normal or mask maps; eight layers now use the game's eight-layer variant, with equal
+  layer heights so its height blend stays the painted weighted blend.
+- Shader variants were read from the game files offline; in-game appearance remains for user playtesting.
+
+# Map Framework 0.4.3 (local map test)
+
+- Keep imported materials' GPU instancing enabled through conversion.
+- Preserve foliage alpha clipping, native cutoff and two-sided flags in explicit material metadata so they
+  survive shader conversion. Restore metallic/smoothness mask maps in the game's lighting shader.
+- Retain saved texture bindings when an interchange material's shader is unavailable. Preserve colour,
+  normal strength and metallic/smoothness values in metadata because unavailable-shader scalar getters return zero.
+  Keep tinted cutouts opaque unless the source explicitly requests transparency.
+- The private Poland map's terrain detail and scenery/collision optimization are local assets, excluded
+  from the public repository and releases. Runtime appearance and frame rate remain for user playtesting.
+
+# Map Framework 0.4.2 (local map test)
+
+- Adapt imported Unity Terrain materials to Sprocket's HDRP terrain shader. Terrain does not inherit Renderer,
+  so the existing mesh material conversion could leave native heightmap scenery using an incompatible material.
+- Keep terrain heights, texture layers and collision intact. Material clones belong to the custom map session;
+  built-in scenery and shared game materials are unchanged.
+- Preserve authored GPU instancing when adapting mesh materials to HDRP, including maps with repeated scenery.
+- The Poland conversion remains a private local map test and is not included in public releases.
+
 # Battle Editor 0.17.31 + Map Framework 0.4.1 (Alpha)
 
 <!-- sp-compat {"hamish.sprocket": "0.2.56.0", "bepinex.bepinex": "6.0.0-be.788"} -->

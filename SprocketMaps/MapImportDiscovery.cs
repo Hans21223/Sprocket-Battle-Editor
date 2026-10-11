@@ -112,8 +112,8 @@ internal static class MapImportDiscovery
             if ((attributes & FileAttributes.ReparsePoint) != 0)
                 throw new InvalidOperationException("Linked map sources are not supported.");
             if ((attributes & FileAttributes.Directory) != 0) return Assets(source,token);
-            if (MapImportSource.Archive(source)) return new[] {source};
-            if (!MapImportSource.Model(source)) throw new InvalidOperationException("Choose an OBJ, FBX, archive or map folder.");
+            if (MapImportSource.Archive(source) || SourceMaps.Is(source)) return new[] {source};
+            if (!MapImportSource.Model(source)) throw new InvalidOperationException("Choose an OBJ, FBX, archive, Garry's Mod map or map folder.");
             return MapImportSource.SelectModelAssets(source,Assets(Path.GetDirectoryName(Path.GetFullPath(source))!,token),token);
         }
         string[] Assets(string folder, CancellationToken token)

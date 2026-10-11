@@ -228,7 +228,7 @@ internal static partial class MainMenu
         else
         {
             if (menuSection == MenuSection.Editor)
-                wanted.Add(("new", "New battle", () => { choosingMap = true; Fill(); }, ShowNew, false));
+                wanted.Add(("new", "New battle", () => { choosingMap = true; maps = null; Fill(); }, ShowNew, false));
             else AddPlayingRows(wanted);
             wanted.Add(("import", "Import a shared battle", () =>
             {

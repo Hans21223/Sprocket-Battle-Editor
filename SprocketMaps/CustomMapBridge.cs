@@ -25,7 +25,7 @@ internal static class CustomMapBridge
 {
     internal const string Carrier = "Sandbox (Low performance)";
     internal const float SpawnSpacing = 8;
-    internal sealed record Definition(string Identifier, string ScenePath, AssetBundle Bundle, Maps.Map Map);
+    internal sealed record Definition(string Identifier, string ScenePath, AssetBundle Bundle, Maps.Map Map, CustomMapManifest.Lighting? Lighting = null);
     static readonly Dictionary<string, Definition> definitions = new(StringComparer.OrdinalIgnoreCase);
     static readonly Dictionary<string, string> failures = new(StringComparer.OrdinalIgnoreCase);
     static string? disabledReason;
@@ -86,7 +86,7 @@ internal static class CustomMapBridge
             var map = new Maps.Map(name, capacity, "custom map with the native game controller", Carrier,
                 Description: $"Custom map: {displayName ?? name}. Up to {capacity} tanks per side. Uses the game's normal vehicle designer and battle controls.",
                 DisplayName: displayName);
-            definitions.Add(name, new Definition(name, path, bundle, map));
+            definitions.Add(name, new Definition(name, path, bundle, map, metadata.Lighting));
             if (disabledReason != null) failures[name] = disabledReason;
             Plugin.ModLog.LogInfo($"Custom environment registered: '{name}', scene='{path}', native carrier='{Carrier}', bundle='{file}'");
         }
@@ -237,8 +237,12 @@ internal static class CustomMapBridge
             throw new InvalidOperationException("This map has invalid ground bounds.");
         if (s.Bounds.size.x < 100 || s.Bounds.size.z < 100 || s.Bounds.size.x > 10000 || s.Bounds.size.z > 10000)
             throw new InvalidOperationException("This map has no usable battle area.");
+        var destructibles = s.Destructibles = Optional("destructible scenery", () => Destructibles.Find(s.Roots)) ?? new(); // before conversion replaces the materials that mark native trees, and before navigation
         CloneMaterials(s);
+        CloneTerrainMaterials(s);
+        Optional("the game's water", () => NativeWater.Apply(s.Environment, s.Roots, s.Owned));
         HideCarrierEnvironment(s);
+        Optional("the map's own lighting", () => MapLighting.Apply(s.Definition.Lighting, s.Controller.gameObject.scene, s.Roots, s.Environment, s.Owned, s.Undo));
         Physics.SyncTransforms();
         // Match the carrier's serialized tank agent (radius, height, climb and slope), rather than editor defaults.
         var settings = s.NativeNavigation.Count > 0 ? s.NativeNavigation[0].Item.GetBuildSettings() : NavMesh.GetSettingsByID(0);
@@ -246,12 +250,22 @@ internal static class CustomMapBridge
         NavMeshBuilder.CollectSources(s.Environment.transform, ~0, NavMeshCollectGeometry.PhysicsColliders, 0,
             new Il2CppSystem.Collections.Generic.List<NavMeshBuildMarkup>(), sources);
         if (sources.Count == 0) throw new InvalidOperationException("This map has no ground collision for tanks.");
+        Optional("destructible scenery", () => Destructibles.Make(destructibles));
         s.Navigation = new NavMeshData(settings.agentTypeID);
         s.NavigationOperation = NavMeshBuilder.UpdateNavMeshDataAsync(s.Navigation, settings, sources, s.Bounds);
         if (s.NavigationOperation == null) throw new InvalidOperationException("Unity did not start building tank navigation.");
         s.Lifetime.NavigationStarted();
         s.Prepared = true;
         Plugin.ModLog.LogInfo($"Custom environment prepared: '{s.Definition.Identifier}', bounds={s.Bounds}, navigation sources={sources.Count}, scoped material clones={s.Materials.Count}");
+    }
+
+    // Extras on top of the map (water, destructibles, lighting) must never stop a map from loading. Guarding the call
+    // also catches failures the feature's own code cannot, such as an interop type that fails to load.
+    static void Optional(string what, Action action) => Optional<object?>(what, () => { action(); return null; });
+    static T? Optional<T>(string what, Func<T> action)
+    {
+        try { return action(); }
+        catch (Exception ex) { Plugin.ModLog.LogWarning($"Map loads without {what}: {ex.GetType().Name}: {ex.Message}"); return default; }
     }
 
     static void CompleteEnvironment(Session s)
@@ -261,8 +275,14 @@ internal static class CustomMapBridge
         s.Lifetime.NavigationFinished();
         var (a, d) = SpawnAnchors(s);
         s.BuildMap = s.Definition.Map with { Attackers = a, Defenders = d };
-        UnityEngine.SceneManagement.SceneManager.MergeScenes(s.CustomScene, s.Controller.gameObject.scene);
-        s.Merged = true;
+        // Merging drops the map scene's lightmaps, so its baked light went missing (Demo City's lamp-lit streets went
+        // dark, 2026-10-11). A lightmapped map stays a scene of its own; cleanup unloads it when the battle ends.
+        if (!s.Roots.SelectMany(r => r.GetComponentsInChildren<Renderer>(true)).Any(r => r.lightmapIndex is >= 0 and < 65534))
+        {
+            UnityEngine.SceneManagement.SceneManager.MergeScenes(s.CustomScene, s.Controller.gameObject.scene);
+            s.Merged = true;
+        }
+        Optional("the map's light probes", MapLighting.AfterMerge);
         AdaptNativeAuthoring(s, a, d);
         Physics.SyncTransforms();
     }
@@ -386,7 +406,19 @@ internal static class CustomMapBridge
         return bounds ?? throw new InvalidOperationException("This map has no solid ground.");
     }
 
+    // Breakables and trees give way under tanks, so a tank may start on a bike or a sign, as the importer checked. By now
+    // they are physics bodies with their colliders on: they're set aside while the starts are found.
     static (Vector2 A, Vector2 D) SpawnAnchors(Session s)
+    {
+        var shoved = s.Destructibles.Where(item => item.Object).SelectMany(item => item.Object.GetComponentsInChildren<Collider>(true))
+            .Where(collider => collider.enabled).ToArray();
+        foreach (var collider in shoved) collider.enabled = false;
+        Physics.SyncTransforms();
+        try { return OpenSpawnAnchors(s); }
+        finally { foreach (var collider in shoved) if (collider) collider.enabled = true; Physics.SyncTransforms(); }
+    }
+
+    static (Vector2 A, Vector2 D) OpenSpawnAnchors(Session s)
     {
         // Find two unobstructed, level areas inside the custom map, rather than using the carrier's spawn positions.
         var candidates = new List<Vector3>();
@@ -409,6 +441,19 @@ internal static class CustomMapBridge
             groundCache[(x, z)] = point;
             return true;
         }
+        // Level ground at a tank's corners; unlike GroundAt, not on tank navigation, which keeps a tank's radius from walls
+        // (in a street the corners of a tank that fits fall outside it).
+        bool SupportAt(float x, float z, out Vector3 point)
+        {
+            point = default;
+            if (!Physics.Raycast(new Vector3(x, bounds.max.y + 100, z), Vector3.down, out var hit, bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore)
+                || hit.collider == null || s.Environment == null || !hit.collider.transform.IsChildOf(s.Environment.transform)
+                || hit.normal.y < 0.95f) return false;
+            point = hit.point;
+            return true;
+        }
+        // Teams start 100 m apart, or half the map's width on a smaller map (as the importer checked).
+        float apart = Math.Min(100, 0.5f * Math.Max(bounds.size.x, bounds.size.z));
         bool TeamClear(Vector3 at, Vector3 toward)
         {
             var direction = toward - at; direction.y = 0;
@@ -420,12 +465,12 @@ internal static class CustomMapBridge
                 var place = at + side * offset.Side + back * offset.Back;
                 if (!GroundAt(place.x, place.z, out var ground)
                     || Math.Abs(ground.y - at.y) > 1
-                    || Physics.CheckBox(ground + Vector3.up * 3, new Vector3(4, 2.4f, 4), facing, ~0, QueryTriggerInteraction.Ignore)) return false;
+                    || Physics.CheckBox(ground + Vector3.up * 3, new Vector3(2, 2.4f, 4.5f), facing, ~0, QueryTriggerInteraction.Ignore)) return false; // a tank's room: 4 x 9 m
                 for (int x = -1; x <= 1; x += 2)
                     for (int z = -1; z <= 1; z += 2)
                     {
-                        var corner = place + side * (x * 4) + back * (z * 4);
-                        if (!GroundAt(corner.x, corner.z, out var supported) || Math.Abs(supported.y - ground.y) > 0.5f) return false;
+                        var corner = place + side * (x * 2) + back * (z * 4.5f);
+                        if (!SupportAt(corner.x, corner.z, out var supported) || Math.Abs(supported.y - ground.y) > 0.5f) return false;
                     }
             }
             return true;
@@ -438,7 +483,7 @@ internal static class CustomMapBridge
         bool ValidPair(Vector3 p, Vector3 q, out Vector3 first, out Vector3 second)
         {
             first = FrontRow(p, q); second = FrontRow(q, p);
-            if ((p - q).sqrMagnitude < 100 * 100 || !TeamClear(first, second) || !TeamClear(second, first)) return false;
+            if ((p - q).sqrMagnitude < apart * apart || !TeamClear(first, second) || !TeamClear(second, first)) return false;
             return navigation.Connects(p, q);
         }
         var transforms = s.Environment!.GetComponentsInChildren<Transform>(true);
@@ -462,12 +507,12 @@ internal static class CustomMapBridge
         if (candidates.Count < 2) throw new InvalidOperationException("This map needs two open spawn areas large enough for its declared tank capacity.");
         var a = candidates[0]; var d = candidates[1]; float distance = 0;
         var pairs = CustomMapNavigation.FarthestPairs(candidates.Select(point =>
-            new CustomMapNavigation.Vertex(point.x, point.y, point.z)).ToArray(), 512, 100 * 100);
+            new CustomMapNavigation.Vertex(point.x, point.y, point.z)).ToArray(), 512, apart * apart);
         // Bound expensive physics/path queries; a large city with disconnected roofs must not freeze the UI.
         foreach (var pair in pairs)
             if (ValidPair(candidates[pair.First], candidates[pair.Second], out var first, out var second))
             { a = first; d = second; distance = pair.DistanceSquared; break; }
-        if (distance < 100 * 100) throw new InvalidOperationException("This map needs two connected, clear team spawn formations at least 100 metres apart.");
+        if (distance < apart * apart) throw new InvalidOperationException($"This map needs two connected, clear team spawn formations at least {apart:0} metres apart.");
         return (new Vector2(a.x, a.z), new Vector2(d.x, d.z));
     }
 
@@ -502,12 +547,27 @@ internal static class CustomMapBridge
         || component.GetComponentInParent<Sprocket.PlayerControl.Player>() != null || component.GetComponentInParent<GameMode>() != null
         || component.GetComponentInParent<WorldBounds>() != null;
 
+    // A player build only has the shader variants its own materials use, and Unity silently substitutes the nearest one.
+    // The game's HDRP/Lit has no alpha-test or double-sided variant (cutout leaves drew as solid cards) and one
+    // transparent variant, a parallax one. Each clone gets exactly one of these keyword sets.
+    static readonly string[] OpaqueKeywords = { "_NORMALMAP_TANGENT_SPACE", "_DISABLE_SSR_TRANSPARENT" };
+    static readonly string[] MappedKeywords = { "_NORMALMAP", "_MASKMAP", "_NORMALMAP_TANGENT_SPACE", "_DISABLE_SSR_TRANSPARENT" };
+    static readonly string[] BlendedKeywords = { "_SURFACE_TYPE_TRANSPARENT", "_ENABLE_FOG_ON_TRANSPARENT", "_DISABLE_SSR_TRANSPARENT",
+        "_NORMALMAP", "_MASKMAP", "_NORMALMAP_TANGENT_SPACE", "_HEIGHTMAP", "_PIXEL_DISPLACEMENT",
+        "_PIXEL_DISPLACEMENT_LOCK_OBJECT_SCALE", "_DISPLACEMENT_LOCK_TILING_SCALE" };
+
     static void CloneMaterials(Session s)
     {
-        var lit = Shader.Find("HDRP/Lit") ?? throw new InvalidOperationException("The game's map lighting shader was not available.");
+        // Map Framework's own HDRP/Lit has every variant these materials need. Without it: the game's HDRP/Lit, with
+        // cutouts on the game's foliage shader (loaded with the carrier scene) or, failing that, alpha-blended.
+        MapShaders.Load();
+        var full = MapShaders.Lit;
+        var lit = full ?? Shader.Find("HDRP/Lit") ?? throw new InvalidOperationException("The game's map lighting shader was not available.");
+        var foliage = full == null ? Shader.Find(FoliageShader) : null;
+        int blendedCount = 0, cutoutCount = 0;
         var clones = new Dictionary<IntPtr, Material>();
         foreach (var root in s.Roots)
-            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true).Concat(TerrainDetailRenderers(root)))
             {
                 var materials = renderer.sharedMaterials;
                 bool changed = false;
@@ -517,13 +577,52 @@ internal static class CustomMapBridge
                     if (!old) continue;
                     var shader = old.shader?.name ?? "";
                     if (shader.StartsWith("HDRP/", StringComparison.Ordinal)) continue;
+                    bool nativePreset = old.GetTag("SprocketMapNativePreset", false, "") == "1";
+                    if (nativePreset
+                        && !clones.ContainsKey(old.Pointer) && NativeSceneryMaterial.TryClone(old, out var native))
+                    {
+                        s.Materials.Add(native);
+                        clones.Add(old.Pointer, native);
+                    }
                     if (!clones.TryGetValue(old.Pointer, out var clone))
                     {
-                        var color = old.HasProperty("_BaseColor") ? old.GetColor("_BaseColor") : old.HasProperty("_Color") ? old.GetColor("_Color") : Color.white;
-                        var texture = old.HasProperty("_BaseMap") ? old.GetTexture("_BaseMap") : old.HasProperty("_MainTex") ? old.GetTexture("_MainTex") : null;
-                        var normal = old.HasProperty("_BumpMap") ? old.GetTexture("_BumpMap") : null;
-                        var emission = old.HasProperty("_EmissionColor") ? old.GetColor("_EmissionColor") : Color.black;
-                        clone = new Material(lit) { name = old.name + " (custom map HDRP)" };
+                        // A fallback shader retains raw texture bindings, but color and scalar getters
+                        // return zero without shader properties. Explicit metadata preserves those values.
+                        bool interchange = old.GetTag("SprocketMapInterchange", false, "") == "standard-v1"
+                            || old.GetTag("SprocketMapAlphaClip", false, "") == "1"
+                            || old.GetTag("SprocketMapMaskMap", false, "") == "1"
+                            || old.GetTag("SprocketMapTransparent", false, "") == "1";
+                        var color = !nativePreset && old.HasProperty("_BaseColor") ? old.GetColor("_BaseColor")
+                            : ReadMaterialColor(old, "_Color", "SprocketMapBaseColor", Color.white, nativePreset);
+                        var texture = old.HasProperty("_BaseMap") ? old.GetTexture("_BaseMap") : old.HasProperty("_MainTex") || interchange ? old.GetTexture("_MainTex") : null;
+                        var normal = old.HasProperty("_BumpMap") || interchange ? old.GetTexture("_BumpMap") : null;
+                        var mask = old.HasProperty("_MetallicGlossMap") || interchange ? old.GetTexture("_MetallicGlossMap") : null;
+                        var emission = ReadMaterialColor(old, "_EmissionColor", "SprocketMapEmissionColor", Color.black, nativePreset);
+                        var emissionMap = old.HasProperty("_EmissionMap") || interchange ? old.GetTexture("_EmissionMap") : null;
+                        float metallic = ReadMaterialFloat(old, "_Metallic", "SprocketMapMetallic", 0, nativePreset);
+                        float smoothness = !nativePreset && old.HasProperty("_Smoothness") ? old.GetFloat("_Smoothness")
+                            : ReadMaterialFloat(old, "_Glossiness", "SprocketMapSmoothness", .15f, nativePreset);
+                        bool transparent = old.HasProperty("_Surface") && old.GetFloat("_Surface") > 0.5f
+                            || old.HasProperty("_Mode") && old.GetFloat("_Mode") >= 2
+                            || old.GetTag("SprocketMapTransparent", false, "") == "1";
+                        bool clipping = old.HasProperty("_AlphaClip") && old.GetFloat("_AlphaClip") > 0.5f
+                            || old.HasProperty("_Mode") && old.GetFloat("_Mode") == 1
+                            || old.IsKeywordEnabled("_ALPHATEST_ON")
+                            || old.GetTag("SprocketMapAlphaClip", false, "") == "1";
+                        if (clipping && !transparent && foliage != null)
+                        {
+                            clone = FoliageCutout(foliage, old, color, texture, normal, mask, smoothness, nativePreset);
+                            s.Materials.Add(clone);
+                            clones.Add(old.Pointer, clone);
+                            cutoutCount++;
+                            materials[i] = clone; changed = true;
+                            continue;
+                        }
+                        clone = new Material(lit)
+                        {
+                            name = old.name + " (custom map HDRP)",
+                            enableInstancing = old.enableInstancing,
+                        };
                         s.Materials.Add(clone);
                         clone.SetColor("_BaseColor", color);
                         if (texture != null)
@@ -533,30 +632,222 @@ internal static class CustomMapBridge
                             clone.SetTextureScale("_BaseColorMap", old.GetTextureScale(property));
                             clone.SetTextureOffset("_BaseColorMap", old.GetTextureOffset(property));
                         }
+                        // Normal and mask maps come as a pair; a missing one is the flat or neutral map.
                         if (normal != null) clone.SetTexture("_NormalMap", normal);
-                        if (old.HasProperty("_BumpScale")) clone.SetFloat("_NormalScale", old.GetFloat("_BumpScale"));
+                        else if (full != null && mask != null) clone.SetTexture("_NormalMap", MapShaders.FlatNormal);
+                        if (full != null && normal != null && mask == null) clone.SetTexture("_MaskMap", MapShaders.NeutralMask);
+                        if (mask == null)
+                        {
+                            // The keyword sets above always carry _MASKMAP with _NORMALMAP; the default white
+                            // mask then has to give the material's own metallic, smoothness and no occlusion.
+                            clone.SetFloat("_MetallicRemapMin", metallic); clone.SetFloat("_MetallicRemapMax", metallic);
+                            clone.SetFloat("_SmoothnessRemapMin", smoothness); clone.SetFloat("_SmoothnessRemapMax", smoothness);
+                            clone.SetFloat("_AORemapMin", 1); clone.SetFloat("_AORemapMax", 1);
+                        }
+                        else
+                        {
+                            clone.SetTexture("_MaskMap", mask);
+                            clone.SetTextureScale("_MaskMap", old.GetTextureScale("_MetallicGlossMap"));
+                            clone.SetTextureOffset("_MaskMap", old.GetTextureOffset("_MetallicGlossMap"));
+                            // Standard metallic maps share HDRP's red/alpha channels. Only an explicitly
+                            // converted HDRP mask carries ambient occlusion in green as well.
+                            if (old.GetTag("SprocketMapMaskMap", false, "") != "1")
+                            {
+                                clone.SetFloat("_AORemapMin", 1);
+                                clone.SetFloat("_AORemapMax", 1);
+                            }
+                            clone.SetFloat("_SmoothnessRemapMax", ReadMaterialFloat(old, "_GlossMapScale", "SprocketMapSmoothnessScale", 1, nativePreset));
+                        }
+                        clone.SetFloat("_NormalScale", ReadMaterialFloat(old, "_BumpScale", "SprocketMapNormalScale", 1, nativePreset));
                         HDMaterial.SetEmissiveColor(clone, emission);
-                        if (old.HasProperty("_Metallic")) clone.SetFloat("_Metallic", old.GetFloat("_Metallic"));
-                        if (old.HasProperty("_Smoothness")) clone.SetFloat("_Smoothness", old.GetFloat("_Smoothness"));
-                        else if (old.HasProperty("_Glossiness")) clone.SetFloat("_Smoothness", old.GetFloat("_Glossiness"));
-                        bool transparent = old.HasProperty("_Surface") && old.GetFloat("_Surface") > 0.5f
-                            || old.HasProperty("_Mode") && old.GetFloat("_Mode") >= 2;
-                        bool clipping = old.HasProperty("_AlphaClip") && old.GetFloat("_AlphaClip") > 0.5f
-                            || old.IsKeywordEnabled("_ALPHATEST_ON");
-                        HDMaterial.SetSurfaceType(clone, transparent);
-                        HDMaterial.SetAlphaClipping(clone, clipping);
-                        if (old.HasProperty("_Cutoff")) HDMaterial.SetAlphaCutoff(clone, old.GetFloat("_Cutoff"));
-                        if (old.HasProperty("_Cull") && old.GetFloat("_Cull") == 0) clone.SetFloat("_DoubleSidedEnable", 1);
-                        // HDRP's own validator selects supported blend/depth/normal/emission keywords and passes.
+                        // An emission map limits the glow to its texture (lit windows, signs). The game's own HDRP/Lit has
+                        // no variant for one, and a whole glowing surface would be worse than none.
+                        if (emissionMap != null)
+                        {
+                            if (full != null)
+                            {
+                                clone.SetTexture("_EmissiveColorMap", emissionMap);
+                                clone.SetTextureScale("_EmissiveColorMap", old.GetTextureScale("_EmissionMap"));
+                                clone.SetTextureOffset("_EmissiveColorMap", old.GetTextureOffset("_EmissionMap"));
+                            }
+                            else HDMaterial.SetEmissiveColor(clone, Color.black);
+                        }
+                        clone.SetFloat("_Metallic", metallic);
+                        clone.SetFloat("_Smoothness", smoothness);
+                        // Without the foliage shader, cutouts are alpha-blended: the parallax variant with zero depth
+                        // and one sample.
+                        bool blended = transparent || clipping && full == null;
+                        HDMaterial.SetSurfaceType(clone, blended);
+                        if (full != null && clipping && !transparent)
+                        {
+                            float cutoff = old.HasProperty("_Cutoff") ? old.GetFloat("_Cutoff") : .5f;
+                            if (TryFiniteFloat(old.GetTag("SprocketMapAlphaCutoff", false, ""), out var tagged)) cutoff = tagged;
+                            HDMaterial.SetAlphaClipping(clone, true);
+                            HDMaterial.SetAlphaCutoff(clone, Mathf.Clamp01(cutoff));
+                            cutoutCount++;
+                        }
+                        if (blended && full == null)
+                        {
+                            clone.SetFloat("_DisplacementMode", 2);
+                            clone.SetFloat("_HeightPoMAmplitude", 0);
+                            clone.SetFloat("_PPDMinSamples", 1); clone.SetFloat("_PPDMaxSamples", 1);
+                            clone.SetFloat("_EnableBlendModePreserveSpecularLighting", 0);
+                            blendedCount++;
+                        }
+                        // Validation sets cull off for double-sided. The game's HDRP/Lit has no _DOUBLESIDED_ON variant,
+                        // so with it the keyword set below leaves that keyword out.
+                        if (old.HasProperty("_Cull") && old.GetFloat("_Cull") == 0
+                            || old.GetTag("SprocketMapDoubleSided", false, "") == "1") clone.SetFloat("_DoubleSidedEnable", 1);
+                        // HDRP's own validator sets the blend, depth, cull and stencil state and the passes.
                         if (!HDMaterial.ValidateMaterial(clone))
                             throw new InvalidOperationException($"The map material '{old.name}' could not use the game's lighting shader.");
+                        if (full == null) clone.shaderKeywords = blended ? BlendedKeywords : normal != null || mask != null ? MappedKeywords : OpaqueKeywords;
+                        else if (blended) blendedCount++;
+                        if (blended && full == null)
+                        {
+                            clone.SetFloat("_HeightAmplitude", 0);
+                            // Its shadow pass cannot clip, so a cutout would cast a solid card's shadow.
+                            clone.SetShaderPassEnabled("ShadowCaster", false);
+                        }
                         clones.Add(old.Pointer, clone);
                     }
                     materials[i] = clone; changed = true;
                 }
                 if (changed) renderer.sharedMaterials = materials;
             }
+        // Terrains cache their grass and rock prototypes' materials; hand the converted ones back.
+        foreach (var root in s.Roots)
+            foreach (var terrain in root.GetComponentsInChildren<Terrain>(true))
+                if (terrain.terrainData is { } data && data.detailPrototypes.Length > 0)
+                {
+                    data.detailPrototypes = data.detailPrototypes;
+                    terrain.Flush();
+                }
+        if (cutoutCount + blendedCount > 0)
+            Plugin.ModLog.LogInfo(full != null
+                ? $"Custom map materials: {cutoutCount} alpha-test cutouts and {blendedCount} transparent on Map Framework's HDRP/Lit ({clones.Count} converted)."
+                : $"Custom map materials: {cutoutCount} cutouts use the game's foliage shader; {blendedCount} transparent or cutout ones are alpha-blended without shadows ({clones.Count} converted).");
     }
+
+    const string FoliageShader = "NatureManufacture/HDRP/Foliage/Foliage";
+    // Its compiled variants: alpha test, both sides and transmission, in every pass including shadows.
+    static readonly string[] FoliageKeywords = { "_ALPHATEST_ON", "_DOUBLESIDED_ON", "_MATERIAL_FEATURE_TRANSMISSION" };
+
+    /// A cutout (leaves, ivy, fences, grates) on the game's own foliage shader. HDRP/Lit has no alpha-test variant
+    /// and can only blend, which costs about half the frame on a dense map and casts no shadow; this one cuts out,
+    /// draws both sides and casts cut-out shadows like the game's own vegetation.
+    static Material FoliageCutout(Shader foliage, Material old, Color color, Texture? texture, Texture? normal, Texture? mask,
+        float smoothness, bool nativePreset)
+    {
+        var clone = new Material(foliage) { name = old.name + " (custom map cutout)", enableInstancing = old.enableInstancing };
+        if (texture != null)
+        {
+            clone.SetTexture("_BaseColorMap", texture);
+            string property = old.HasProperty("_BaseMap") ? "_BaseMap" : "_MainTex";
+            var scale = old.GetTextureScale(property); var offset = old.GetTextureOffset(property);
+            clone.SetVector("_TilingOffset", new Vector4(scale.x, scale.y, offset.x, offset.y));
+        }
+        // Its leaf tint varies between these two by noise; equal, it is the material's own colour.
+        clone.SetColor("_HealthyColor", color); clone.SetColor("_DryColor", color);
+        if (normal != null) clone.SetTexture("_NormalMap", normal);
+        clone.SetFloat("_NormalScale", ReadMaterialFloat(old, "_BumpScale", "SprocketMapNormalScale", 1, nativePreset));
+        if (mask == null)
+        {
+            clone.SetFloat("_SmoothnessRemapMin", smoothness); clone.SetFloat("_SmoothnessRemapMax", smoothness);
+            clone.SetFloat("_AORemapMin", 1); clone.SetFloat("_AORemapMax", 1);
+        }
+        else
+        {
+            clone.SetTexture("_MaskMap", mask);
+            if (old.GetTag("SprocketMapMaskMap", false, "") != "1") { clone.SetFloat("_AORemapMin", 1); clone.SetFloat("_AORemapMax", 1); }
+            clone.SetFloat("_SmoothnessRemapMax", ReadMaterialFloat(old, "_GlossMapScale", "SprocketMapSmoothnessScale", 1, nativePreset));
+        }
+        float cutoff = old.HasProperty("_Cutoff") ? old.GetFloat("_Cutoff") : .5f;
+        if (TryFiniteFloat(old.GetTag("SprocketMapAlphaCutoff", false, ""), out var tagged)) cutoff = tagged;
+        cutoff = Mathf.Clamp01(cutoff);
+        clone.SetFloat("_AlphaCutoff", cutoff); clone.SetFloat("_AlphaShadowThreshold", cutoff);
+        // Still scenery: no wind bending (merged meshes carry no bend weights) and no distance fade.
+        foreach (var still in new[] { "_InitialBend", "_Drag", "_AlphaDrag", "_ShiverDrag", "_HeightDrag" }) clone.SetFloat(still, 0);
+        clone.SetFloat("_CullFarStart", 100000);
+        clone.shaderKeywords = FoliageKeywords;
+        clone.renderQueue = 2450; // HDRP's opaque alpha-test queue
+        return clone;
+    }
+
+    static Color ReadMaterialColor(Material material, string property, string tag, Color fallback, bool metadataOnly = false)
+    {
+        if (!metadataOnly && material.HasProperty(property)) return material.GetColor(property);
+        var parts = material.GetTag(tag, false, "").Split(',');
+        if (parts.Length != 4 || !TryFiniteFloat(parts[0], out var red)
+            || !TryFiniteFloat(parts[1], out var green) || !TryFiniteFloat(parts[2], out var blue)
+            || !TryFiniteFloat(parts[3], out var alpha)) return fallback;
+        return new Color(red, green, blue, alpha);
+    }
+
+    static float ReadMaterialFloat(Material material, string property, string tag, float fallback, bool metadataOnly = false)
+    {
+        if (!metadataOnly && material.HasProperty(property)) return material.GetFloat(property);
+        return TryFiniteFloat(material.GetTag(tag, false, ""), out var value) ? value : fallback;
+    }
+
+    static bool TryFiniteFloat(string text, out float value) => float.TryParse(text,
+        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture,
+        out value) && float.IsFinite(value);
+
+    // Terrain grass and rocks draw their prototype prefabs, which live outside the scene hierarchy.
+    static IEnumerable<Renderer> TerrainDetailRenderers(GameObject root) => root.GetComponentsInChildren<Terrain>(true)
+        .Where(t => t.terrainData != null).SelectMany(t => t.terrainData.detailPrototypes)
+        .Where(p => p.prototype != null).SelectMany(p => p.prototype.GetComponentsInChildren<Renderer>(true));
+
+    static void CloneTerrainMaterials(Session s)
+    {
+        Shader? terrainShader = null;
+        foreach (var root in s.Roots)
+            foreach (var terrain in root.GetComponentsInChildren<Terrain>(true))
+            {
+                var old = terrain.materialTemplate;
+                if (old != null && (old.shader?.name ?? "").StartsWith("HDRP/", StringComparison.Ordinal)) continue;
+                terrainShader ??= Shader.Find("HDRP/TerrainLit")
+                    ?? throw new InvalidOperationException("The game's terrain lighting shader was not available.");
+                // Terrain does not inherit Renderer. Its native heightmap, layers and collision must
+                // remain intact; only the material on this owned custom scene needs adapting to HDRP.
+                var clone = new Material(terrainShader)
+                {
+                    name = terrain.name + " (custom terrain HDRP)",
+                    enableInstancing = terrain.drawInstanced,
+                };
+                s.Materials.Add(clone);
+                // Only the editor's inspector sets the layer keywords; without them HDRP draws four layers and no
+                // normal or mask maps. The game's build has eight layers only together with height blending.
+                var layers = terrain.terrainData != null ? terrain.terrainData.terrainLayers : null;
+                int count = layers?.Length ?? 0;
+                bool mapped = layers != null && layers.Any(l => l != null && (l.normalMapTexture != null || l.maskMapTexture != null));
+                clone.SetFloat("_EnableInstancedPerPixelNormal", 1);
+                clone.SetFloat("_EnableHeightBlend", count > 4 ? 1 : 0);
+                if (!HDMaterial.ValidateMaterial(clone))
+                    throw new InvalidOperationException($"The terrain '{terrain.name}' could not use the game's lighting shader.");
+                clone.shaderKeywords = count > 4 ? EightLayerTerrainKeywords : mapped ? MappedTerrainKeywords : TerrainKeywords;
+                if (count > 4)
+                {
+                    // Equal heights make the height blend a plain weighted blend, as the map was painted.
+                    foreach (var layer in layers!)
+                    {
+                        if (layer == null) continue;
+                        var min = layer.maskMapRemapMin; var max = layer.maskMapRemapMax;
+                        min.z = max.z = .5f;
+                        layer.maskMapRemapMin = min; layer.maskMapRemapMax = max;
+                    }
+                    terrain.terrainData!.terrainLayers = layers;
+                }
+                if (count > 8) Plugin.ModLog.LogWarning($"The terrain '{terrain.name}' has {count} layers; the game draws the first 8.");
+                terrain.materialTemplate = clone;
+            }
+    }
+
+    static readonly string[] TerrainKeywords = { "_TERRAIN_INSTANCED_PERPIXEL_NORMAL" };
+    static readonly string[] MappedTerrainKeywords = { "_NORMALMAP", "_MASKMAP", "_TERRAIN_INSTANCED_PERPIXEL_NORMAL" };
+    static readonly string[] EightLayerTerrainKeywords = { "_NORMALMAP", "_MASKMAP", "_TERRAIN_8_LAYERS",
+        "_TERRAIN_BLEND_HEIGHT", "_TERRAIN_INSTANCED_PERPIXEL_NORMAL" };
 
     static void ResumeNative(Session s)
     {
@@ -601,6 +892,7 @@ internal static class CustomMapBridge
         internal AsyncOperation? Operation, NavigationOperation, UnloadOperation;
         internal NativeTask? InitTask;
         internal Scene CustomScene;
+        internal List<Destructibles.Item> Destructibles = new(); // breakables and trees: set aside while starts are checked
         internal Bounds Bounds;
         internal GameObject? Environment;
         internal NavMeshData? Navigation;
@@ -609,6 +901,8 @@ internal static class CustomMapBridge
         internal bool Prepared, Merged, Initialized, Recovering;
         internal readonly List<GameObject> Roots = new();
         internal readonly List<Material> Materials = new();
+        internal readonly List<UnityEngine.Object> Owned = new(); // other runtime assets made for this map
+        internal readonly List<Action> Undo = new(); // carrier changes to reverse when the map goes
         internal readonly List<(Renderer Item, bool Enabled)> Renderers = new();
         internal readonly List<(Terrain Item, bool Enabled)> Terrains = new();
         internal readonly List<(Collider Item, bool Enabled)> Colliders = new();
@@ -694,6 +988,8 @@ internal static class CustomMapBridge
                         if (hadData && !item.navMeshDataInstance.valid) item.AddData();
                     }
                 NativeNavigation.Clear();
+                foreach (var undo in Undo) try { undo(); } catch (Exception ex) { Plugin.ModLog.LogWarning($"A carrier setting was not restored: {ex.Message}"); }
+                Undo.Clear();
                 foreach (var (item, enabled) in Renderers) if (item) item.enabled = enabled;
                 foreach (var (item, enabled) in Terrains) if (item) item.enabled = enabled;
                 foreach (var (item, enabled) in Colliders) if (item) item.enabled = enabled;
@@ -703,7 +999,8 @@ internal static class CustomMapBridge
                     UnloadOperation = UnityEngine.SceneManagement.SceneManager.UnloadSceneAsync(CustomScene)
                         ?? throw new InvalidOperationException("Unity did not start removing the rejected custom scene.");
                 foreach (var material in Materials) if (material) UnityEngine.Object.Destroy(material);
-                Materials.Clear(); Roots.Clear();
+                foreach (var item in Owned) if (item) UnityEngine.Object.Destroy(item);
+                Materials.Clear(); Owned.Clear(); Roots.Clear();
                 Physics.SyncTransforms();
                 disposed = true;
             }
@@ -716,7 +1013,7 @@ internal static class CustomMapBridge
 public sealed class CustomMapRunner : MonoBehaviour
 {
     public CustomMapRunner(IntPtr pointer) : base(pointer) { }
-    void Update() { AutoMapImport.Step(); CustomMapBridge.Step(); }
+    void Update() { AutoMapImport.Step(); CustomMapBridge.Step(); Destructibles.Tick(); }
     void OnGUI() => AutoMapImport.Draw();
     void OnApplicationQuit() => AutoMapImport.Stop();
 }

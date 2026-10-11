@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Development-only check plugin; never packaged. See Plugin.cs. -->
+  <Import Project="..\..\SprocketMod.props" />
+  <PropertyGroup>
+    <AssemblyName>InGameCheck</AssemblyName>
+  </PropertyGroup>
+</Project>

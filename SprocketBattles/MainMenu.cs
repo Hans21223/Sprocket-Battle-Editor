@@ -236,7 +236,7 @@ internal static partial class MainMenu
         Btn(root, "Playing", 390, 140, 310, 42, () => SelectSection(MenuSection.Playing), primary: menuSection == MenuSection.Playing);
         Text(root, $"YOUR BATTLES  ({battles.Count})", 60, 192, 310, 34, 22, Ink, TextAlignmentOptions.Left, bold: true).characterSpacing = 4;
         if (menuSection == MenuSection.Editor)
-            Btn(root, "+  NEW BATTLE", 470, 188, 230, 42, () => { choosingMap = true; newName = ""; Build(); }, primary: choosingMap);
+            Btn(root, "+  NEW BATTLE", 470, 188, 230, 42, () => { choosingMap = true; maps = null; newName = ""; Build(); }, primary: choosingMap);
         else
         {
             Btn(root, "Quick battle", 390, 188, 150, 42, () => ToggleFallbackMode(false), primary: quickOpen, size: 15);
@@ -436,6 +436,7 @@ internal static partial class MainMenu
         return maps = list.OrderBy(m => m.Order).Select(m => (m.Map, m.Splash, m.ScenarioSplash, m.Spawns)).ToList();
     }
 
+    // Read again whenever the map picker opens: Map Framework can finish importing a map at any time.
     static List<(string Map, string Splash, string ScenarioSplash, int Spawns)>? maps;
     static readonly Dictionary<string, int> enemySpawnCapacities = new(StringComparer.Ordinal);
 

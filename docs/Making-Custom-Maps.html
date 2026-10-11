@@ -1,0 +1,243 @@
+<title>Making Sprocket Maps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* Layout: one reading column with a sticky contents rail on wide screens; field-manual feel, olive and steel. */
+  :root {
+    --bg: #f6f6f2; --surface: #ffffff; --ink: #20241c; --muted: #5d6356; --line: #d9dbd0;
+    --accent: #56692f; --accent-ink: #ffffff; --code-bg: #eef0e6; --warn: #8a5a12; --warn-bg: #f7ecd6;
+    --display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+    --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161813; --surface: #1e211a; --ink: #e6e8df; --muted: #a3a99a; --line: #343829;
+      --accent: #a9c06d; --accent-ink: #161813; --code-bg: #262a20; --warn: #e8b766; --warn-bg: #2c2618; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161813; --surface: #1e211a; --ink: #e6e8df; --muted: #a3a99a; --line: #343829;
+    --accent: #a9c06d; --accent-ink: #161813; --code-bg: #262a20; --warn: #e8b766; --warn-bg: #2c2618; color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--ink); font: 17px/1.6 var(--body); }
+  .page { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 80px;
+    display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; }
+  @media (max-width: 860px) { .page { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 56px; } }
+  nav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-size: 15px; }
+  @media (max-width: 860px) { nav { position: static; } }
+  nav p { font: 700 13px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  nav ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  nav a { color: var(--ink); text-decoration: none; border-left: 2px solid var(--line); padding-left: 10px; display: block; }
+  nav a:hover, nav a:focus-visible { border-color: var(--accent); color: var(--accent); }
+  @media (max-width: 860px) { nav ol { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
+  main { min-width: 0; max-width: 70ch; }
+  header .kicker { font: 700 13px/1 var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 0 0 12px; }
+  h1 { font: 700 clamp(34px, 6vw, 52px)/1.05 var(--display); margin: 0 0 16px; text-wrap: balance; }
+  header .lede { font-size: 19px; color: var(--muted); margin: 0 0 28px; }
+  h2 { font: 700 28px/1.15 var(--display); margin: 56px 0 14px; padding-top: 12px; border-top: 1px solid var(--line); text-wrap: balance; }
+  h3 { font: 600 20px/1.25 var(--display); margin: 28px 0 8px; letter-spacing: .01em; }
+  p, li { margin: 0 0 12px; }
+  ul, ol.steps { padding-left: 22px; }
+  a { color: var(--accent); }
+  code, kbd { font: 14px/1.4 var(--mono); background: var(--code-bg); border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere; }
+  pre { font: 14px/1.5 var(--mono); background: var(--code-bg); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; }
+  pre code { background: none; padding: 0; }
+  ol.steps { counter-reset: step; list-style: none; padding: 0; display: grid; gap: 14px; }
+  ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; margin: 0; }
+  ol.steps > li::before { content: counter(step); font: 700 16px/34px var(--display); text-align: center; width: 34px; height: 34px;
+    border-radius: 50%; background: var(--accent); color: var(--accent-ink); }
+  ol.steps strong { display: block; }
+  .table-wrap { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 15.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font: 600 13px/1.3 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--code-bg); }
+  tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .note { border-left: 3px solid var(--warn); background: var(--warn-bg); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 0 0 18px; }
+  .note p:last-child { margin: 0; }
+  figure { margin: 8px 0 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+  figure svg { display: block; width: 100%; height: auto; max-width: 100%; }
+  figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .fig-ink { stroke: var(--ink); fill: none; }
+  .fig-fill { fill: var(--accent); }
+  .fig-soft { fill: var(--code-bg); stroke: var(--line); }
+  .fig-text { fill: var(--muted); font: 13px var(--body); }
+  .fig-label { fill: var(--ink); font: 600 13px var(--display); letter-spacing: .04em; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+
+<div class="page">
+  <nav aria-label="Contents">
+    <p>Contents</p>
+    <ol>
+      <li><a href="#need">What you need</a></li>
+      <li><a href="#quick">Quick start</a></li>
+      <li><a href="#gmod">Garry's Mod maps</a></li>
+      <li><a href="#rules">Map rules</a></li>
+      <li><a href="#spawns">Starting areas</a></li>
+      <li><a href="#materials">Materials</a></li>
+      <li><a href="#terrain">Terrain</a></li>
+      <li><a href="#lighting">Light and sky</a></li>
+      <li><a href="#special">Special objects</a></li>
+      <li><a href="#performance">Performance</a></li>
+      <li><a href="#sharing">Sharing a map</a></li>
+      <li><a href="#trouble">Troubleshooting</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header>
+      <p class="kicker">Map Framework guide</p>
+      <h1>Making Sprocket Maps</h1>
+      <p class="lede">Build a battlefield in Blender, Unity or any 3D tool, drop it in a folder, and Map Framework turns it into a map you can fight on in Sprocket's Battle Editor.</p>
+    </header>
+
+    <h2 id="need">What you need</h2>
+    <ul>
+      <li><strong>Sprocket</strong> with the Sprocket Mod Loader, <strong>Battle Editor</strong> and <strong>Map Framework 0.5.0 or newer</strong>. Water, destructible scenery and the map's own lighting need 0.5.0.</li>
+      <li><strong>A scene</strong>: an OBJ or FBX model with its textures, a Unity scene or prefab (loose, or in a <code>.unitypackage</code>), or a <a href="#gmod">Garry's Mod map</a>.</li>
+      <li><strong>Unity 6000.3.21f1</strong>, the exact version Sprocket uses (the free Personal licence is fine). Map Framework runs it hidden in the background to convert your map. It looks in Unity Hub's default folder and in <code>&lt;drive&gt;:\Unity\6000.3.21f1</code>. For anywhere else, set <code>Unity editor path</code> under <code>[Import]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code>.</li>
+    </ul>
+    <p>People you give a finished map to don't need Unity. See <a href="#sharing">Sharing a map</a>.</p>
+
+    <h2 id="quick">Quick start</h2>
+    <ol class="steps">
+      <li><div><strong>Make or collect your scenery.</strong> Ground, roads, buildings, cover. Use your own work or assets whose licence lets you use them.</div></li>
+      <li><div><strong>Put it in the CustomMaps folder</strong> inside the game folder:
+        <pre><code>Sprocket\BepInEx\plugins\SprocketMaps\CustomMaps\</code></pre>
+        One folder per map, holding the model, its <code>.mtl</code> and its textures. A <code>.zip</code>, <code>.7z</code> or <code>.unitypackage</code> can go in directly, and archives inside archives are unpacked too.</div></li>
+      <li><div><strong>Start Sprocket.</strong> Map Framework converts the map in the background and shows its progress on screen: unpacking, importing scenery, adding collision, checking tank navigation and starting positions, saving. A conversion may take up to 15 minutes.</div></li>
+      <li><div><strong>Open the map picker</strong> after the notice <em>"Map imported: … Open the map picker to choose it."</em> In Battle Editor, choose <em>New battle</em>; your map is listed under its folder or file name.</div></li>
+      <li><div><strong>Place tanks and press Play.</strong> The game supplies the sky, sun, controls and vehicle designer.</div></li>
+    </ol>
+    <p>Converted maps are cached. Change any source file and the map is converted again on the next start.</p>
+
+    <h2 id="gmod">Garry's Mod maps</h2>
+    <p>A Garry's Mod map can go into <code>CustomMaps</code> as it is: a workshop addon (<code>.gma</code>; subscribed ones are in <code>steamapps\workshop\content\4000\&lt;item&gt;\</code>, all called <code>gmpublisher.gma</code>) or a map file (<code>.bsp</code>). Map Framework converts it and lists it under the map's own name. What comes across:</p>
+    <ul>
+      <li>The map's brushes, terrain (displacements) and props, with their textures from the addon, the map itself and Garry's Mod's own content. Install Garry's Mod for maps that use its or Half-Life 2's textures; Map Framework finds it in any Steam library. Without it those surfaces are plain.</li>
+      <li>Water becomes the game's water. Props smaller than about 15 m across, and the map's physics props, become <a href="#special">breakables</a> that tanks shove aside.</li>
+      <li>Left out: tool and sky surfaces, the 3D skybox, the map's own lighting (the game's sun lights it) and anything that needs another addon's content.</li>
+    </ul>
+    <p>Maps keep Source's scale (1 unit = 1 inch), which makes props about a fifth larger than life. Many Garry's Mod maps are built for people on foot, so narrow streets hold fewer tanks: Map Framework fits as many as the streets allow, sometimes one a side, and the import fails with a message if none fit. Workshop maps belong to their authors: share a converted map only with their permission.</p>
+
+    <h2 id="rules">Map rules</h2>
+    <p>The converter checks every map before it reaches the game. A map that fails tells you why on screen and changes nothing.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Check</th><th>Requirement</th></tr></thead>
+      <tbody>
+        <tr><td>Size</td><td class="num">100 m to 10 km on both horizontal axes</td></tr>
+        <tr><td>Collision</td><td>Automatic: every mesh becomes solid. Tanks drive on what you see.</td></tr>
+        <tr><td>Tank navigation</td><td class="num">Tank radius 2.5 m, height 5 m, steepest slope 23°, largest step 0.5 m</td></tr>
+        <tr><td>Starting areas</td><td>Two clear, flat areas at least 100 m apart, joined by drivable ground</td></tr>
+        <tr><td>Team size</td><td class="num">Tries 16 tanks per side, then 8, 4, 2 and 1</td></tr>
+        <tr><td>Files</td><td class="num">Up to 2 GB and 20,000 files per map</td></tr>
+      </tbody>
+    </table></div>
+    <p>Scripts, cameras, audio, animations and rigidbodies are removed, so the map is plain scenery. Lights stay. When a folder holds several scenes, the largest <code>.unity</code> file is used; without a scene, the largest model or prefab.</p>
+
+    <h2 id="spawns">Starting areas</h2>
+    <p>Each team starts in a grid with tanks 8 m apart. Every tank needs an 8 × 8 m patch that is flat to within 0.5 m and has 4.8 m of open space above it.</p>
+    <figure>
+      <svg viewBox="0 0 640 220" role="img" aria-labelledby="fig-title">
+        <title id="fig-title">Two starting areas at least 100 metres apart, each a grid of 8 metre tank spots</title>
+        <rect class="fig-soft" x="24" y="40" width="150" height="140" rx="6"/>
+        <rect class="fig-soft" x="466" y="40" width="150" height="140" rx="6"/>
+        <g class="fig-fill">
+          <rect x="44" y="60" width="26" height="26" rx="3"/><rect x="86" y="60" width="26" height="26" rx="3"/><rect x="128" y="60" width="26" height="26" rx="3"/>
+          <rect x="44" y="100" width="26" height="26" rx="3"/><rect x="86" y="100" width="26" height="26" rx="3"/><rect x="128" y="100" width="26" height="26" rx="3"/>
+          <rect x="44" y="140" width="26" height="26" rx="3"/><rect x="86" y="140" width="26" height="26" rx="3"/>
+          <rect x="486" y="60" width="26" height="26" rx="3"/><rect x="528" y="60" width="26" height="26" rx="3"/><rect x="570" y="60" width="26" height="26" rx="3"/>
+          <rect x="486" y="100" width="26" height="26" rx="3"/><rect x="528" y="100" width="26" height="26" rx="3"/><rect x="570" y="100" width="26" height="26" rx="3"/>
+          <rect x="486" y="140" width="26" height="26" rx="3"/><rect x="528" y="140" width="26" height="26" rx="3"/>
+        </g>
+        <line class="fig-ink" x1="186" y1="110" x2="454" y2="110" stroke-width="1.5" stroke-dasharray="6 5"/>
+        <path class="fig-ink" d="M186 104 L178 110 L186 116 M454 104 L462 110 L454 116" stroke-width="1.5"/>
+        <text class="fig-label" x="320" y="100" text-anchor="middle">at least 100 m, drivable</text>
+        <text class="fig-label" x="99" y="30" text-anchor="middle">Sprocket Spawn Area A</text>
+        <text class="fig-label" x="541" y="30" text-anchor="middle">Sprocket Spawn Area B</text>
+        <text class="fig-text" x="99" y="204" text-anchor="middle">spots 8 m apart</text>
+        <text class="fig-text" x="541" y="204" text-anchor="middle">8 × 8 m, flat, 4.8 m clear</text>
+      </svg>
+      <figcaption>An 8-tank team as the converter lays it out; teams face each other.</figcaption>
+    </figure>
+    <p>To choose the starting areas yourself, add two empty objects named exactly <code>Sprocket Spawn Area A</code> and <code>Sprocket Spawn Area B</code> on flat ground. Without them, the converter searches the map for the farthest pair of clear, connected areas.</p>
+
+    <h2 id="materials">Materials and textures</h2>
+    <p>Unity Standard, URP Lit and HDRP Lit materials, and FBX materials, keep their look:</p>
+    <ul>
+      <li>base colour and colour texture, with tiling and offset;</li>
+      <li>normal map and its strength;</li>
+      <li>metallic and smoothness, or an HDRP mask map (metallic in red, occlusion in green, smoothness in alpha);</li>
+      <li>emission colour and emission map;</li>
+      <li>alpha cut-outs for leaves, fences and grilles (with cut-out shadows), transparency for glass and water, and double-sided surfaces.</li>
+    </ul>
+    <p>For OBJ files, the <code>.mtl</code> gives the diffuse colour (<code>Kd</code>), opacity (<code>d</code> or <code>Tr</code>) and diffuse texture (<code>map_Kd</code>, with <code>-s</code> and <code>-o</code> for tiling and offset). Use FBX or a Unity scene for normal maps. Custom shaders are not imported; their textures and colours are read under the usual property names.</p>
+
+    <h2 id="terrain">Terrain</h2>
+    <p>A Unity scene can use Unity Terrain. Its heights and up to 8 painted layers, with their normal and mask maps, carry over. Layers beyond the eighth are ignored, because the game's terrain shader draws eight.</p>
+    <ul>
+      <li>Terrain grass and rocks carry over when their materials use Unity's Standard shader. Grass made for URP or HDRP loses its texture.</li>
+      <li>Place trees as ordinary objects, not terrain trees, which are not converted. Name them <code>Sprocket Tree</code> to make them destructible.</li>
+    </ul>
+
+    <h2 id="lighting">Light and sky</h2>
+    <p>Models without lighting (OBJ, FBX) get the game's own sun and sky. A Unity scene with baked lightmaps or its own skybox keeps its lighting, so a night map stays at night:</p>
+    <ul>
+      <li><strong>Baked lighting</strong>: lightmaps and light probes come across, so the light of baked street lamps and windows falls on the streets and on the tanks. Bake in your Unity project before exporting. Baked spot and point lamps also shine in real time near the camera (no shadows), so tanks driving under them are lit; <code>Real-time lamp distance</code> under <code>[Lighting]</code> sets how far (0 keeps them baked only, which costs nothing), and <code>Real-time lamp brightness</code> multiplies them. Give street lamps a realistic brightness in your scene: a lamp a few candela strong, hung high, barely reaches the road.</li>
+      <li><strong>Sun or moon</strong>: a real-time directional light becomes the game's sun, with its direction, colour and strength. If you baked it, there is no real-time sun, as in your scene.</li>
+      <li><strong>Sky</strong>: the sky is built from your ambient colours (Window ▸ Rendering ▸ Lighting ▸ Environment), and it also lights the scene the way your ambient light did.</li>
+      <li><strong>Fog</strong>: your scene's fog setting is kept.</li>
+    </ul>
+    <p>Brightness matches Unity's built-in renderer. If a map looks too bright or too dark, change <code>Map lighting exposure</code> under <code>[Lighting]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code> (higher is darker). To use the game's daylight instead, add an empty object named <code>Sprocket Game Lighting</code>.</p>
+
+    <h2 id="special">Special objects</h2>
+    <p>Give an object one of these names (the start of its name is enough) in Blender, Unity or your modelling tool. FBX keeps object names; for OBJ, use object (<code>o</code>) or group (<code>g</code>) names.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>What it does in game</th></tr></thead>
+      <tbody>
+        <tr><td><code>Sprocket Spawn Area A</code><br><code>Sprocket Spawn Area B</code></td><td>Where the two teams start.</td></tr>
+        <tr><td><code>Sprocket Game Lighting</code></td><td>Uses the game's own sun and sky instead of the map's lighting.</td></tr>
+        <tr><td><code>Sprocket Water Surface</code></td><td>A flat plane at the water level becomes the game's own water, the system Sandbox's ocean uses. If water is off in the player's graphics settings, your plane is shown instead. Tanks drive on the lake bed beneath it.</td></tr>
+        <tr><td><code>Sprocket Tree</code></td><td>Bends and snaps when a tank hits it, using the game's own tree destruction, tuned for its height. Works for poles, posts and lamp posts too. Trees built from the game's own foliage presets are destructible automatically.</td></tr>
+        <tr><td><code>Sprocket Breakable</code><br><code>Sprocket Breakable 800</code></td><td>A tank knocks it loose and shoves it: fences, crates, barrels, carts, wrecks. The number is its mass in kilograms; without one, the mass comes from its size. It stays still and costs nothing until hit. Objects over 30 m across stay fixed.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Trees and breakable objects don't block AI navigation, so AI tanks drive through them as a player would.</p>
+
+    <h2 id="performance">Performance</h2>
+    <p>In Sprocket, every visible object costs CPU time each frame, because the game draws each one separately. Object count matters more than triangle count.</p>
+    <ul>
+      <li>Keep separate objects to a few thousand. A map with tens of thousands of props can drop below 30 fps on a fast PC.</li>
+      <li>Give detailed props LOD groups, so far-away copies draw a simpler mesh and tiny ones stop drawing. In an FBX, name the meshes <code>_LOD0</code>, <code>_LOD1</code> and so on, and Unity builds the LOD group.</li>
+      <li>Don't combine leaves and other cut-out foliage into large merged meshes. That is slower than separate trees.</li>
+      <li>Use terrain grass with care: it is drawn around the camera and adds up quickly.</li>
+    </ul>
+
+    <h2 id="sharing">Sharing a map</h2>
+    <p>After a successful conversion, the finished map is in</p>
+    <pre><code>Sprocket\BepInEx\cache\SprocketMaps-imports\&lt;id&gt;\Output\</code></pre>
+    <p>as a <code>.bundle</code> file and a <code>.json</code> file with the same name. Give someone both files, unrenamed, to put in their <code>CustomMaps</code> folder; their game loads the map without Unity. The <code>.json</code> sets the map's display name and how many tanks per side it holds (1 to 16).</p>
+    <p>You can also share your source folder or archive, but then the other player needs Unity to convert it.</p>
+    <div class="note"><p><strong>Only share what you have the rights to.</strong> Use your own models or assets licensed for redistribution. Don't extract maps or models from other games; their terms forbid it.</p></div>
+
+    <h2 id="trouble">Troubleshooting</h2>
+    <h3>The map isn't in the list</h3>
+    <p>Wait for the "Map imported" notice, then close and reopen the map picker. A map already loaded this session picks up later changes after a restart.</p>
+    <h3>The conversion failed</h3>
+    <p>The on-screen message gives the reason. The full details are in <code>import.log</code> and <code>last-failure.json</code> in the map's folder under <code>BepInEx\cache\SprocketMaps-imports\</code>.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Message</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td>Automatic map import needs Unity 6000.3.21f1 installed.</td><td>Install that exact version, or set its path in the config file.</td></tr>
+        <tr><td>No scenery model or Unity scene found.</td><td>The folder or archive needs an OBJ, FBX, <code>.unity</code> or <code>.prefab</code>.</td></tr>
+        <tr><td>Map ground must span at least 100 metres on both horizontal axes and no more than 10 kilometres.</td><td>Check the scale: many tools export in centimetres. Make sure the ground is part of the model.</td></tr>
+        <tr><td>No safe connected tank formation pair exists at capacities 16, 8, 4, 2 or 1.</td><td>Add flat, open areas at least 100 m apart, joined by slopes under 23°, and mark them with the spawn area names.</td></tr>
+        <tr><td>Map conversion exceeded its 15-minute limit.</td><td>Reduce texture sizes and object count, or split very large scenes.</td></tr>
+      </tbody>
+    </table></div>
+
+    <footer>Map Framework is part of the Battle Editor project for Sprocket. This guide matches Map Framework 0.5.0.</footer>
+  </main>
+</div>

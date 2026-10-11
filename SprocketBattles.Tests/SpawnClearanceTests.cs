@@ -56,6 +56,16 @@ static class SpawnClearanceTests
             5 + 0.25f * (x - 1000) - 0.5f * (z + 200)), "translated terrain placement");
         Near(moved, original, "terrain coordinates are world coordinates rather than offsets from zero");
 
+        // The surface a placed tank stands on is the one nearest its placed height, not the highest under it.
+        Check(SpawnClearance.Support(new[] { (3.8f, true), (12.6f, false), (10.1f, false) }, 3.83f, false) == 3.8f,
+            "a tree or lamp post beside a tank on the street does not lift it");
+        Check(SpawnClearance.Support(new[] { (2f, true), (10f, false) }, 10.1f, false) == 10f, "a tank on a bridge deck stays on it");
+        Check(SpawnClearance.Support(new[] { (0f, false), (6f, false) }, 0.2f, false) == 0f, "a tank indoors stays on the floor, not the roof");
+        Check(SpawnClearance.Support(new[] { (30f, true) }, 0, false) == 30f, "higher ground with nothing else is still found");
+        Check(SpawnClearance.Support(new[] { (1f, false), (-1f, false) }, 0, false) == 1f, "equally near: the higher surface");
+        Check(SpawnClearance.Support(new[] { (5f, true), (0.5f, false) }, 0, true) == 5f, "terrain-first staging keeps the terrain");
+        Check(SpawnClearance.Support(Array.Empty<(float, bool)>(), 0, false) == null, "no surface stays unknown");
+
         // Missing ground must remain unknown; holes and invalid hits must not erase valid terrain support.
         Check(SpawnClearance.RootHeight(-2, 2, -2, 2, -1, (_, _) => null) == null, "unknown terrain does not invent a height");
         Check(SpawnClearance.RootHeight(-2, 2, -2, 2, -1, (_, _) => float.NaN) == null, "all invalid terrain remains unknown");

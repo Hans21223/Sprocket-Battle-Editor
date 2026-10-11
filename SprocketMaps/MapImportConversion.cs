@@ -52,7 +52,9 @@ internal static class MapImportConversion
         source = Path.GetFullPath(source);
         progress("Checking map files");
         var fingerprint = MapImportSource.Fingerprint(source,token);
-        var key = System.Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(source).ToUpperInvariant() + fingerprint + template))).ToLowerInvariant();
+        // Short folder names: the Unity project sits below them, and Unity's scripts can't open paths over 260 characters
+        // (gm_bigcity's textures, 2026-10-11). 128 bits of key and 32 of work id are plenty.
+        var key = System.Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(source).ToUpperInvariant() + fingerprint + template)))[..32].ToLowerInvariant();
         var folder = Path.GetFullPath(Path.Combine(cache,key));
         Directory.CreateDirectory(folder);
         // Serialise converters across processes too: a second importer must never observe or
@@ -66,10 +68,13 @@ internal static class MapImportConversion
             PublishBundlePath(Path.Combine(output,"ready.json"),bundle);
             progress("Using the previously imported map"); return new(source,fingerprint,bundle,capacity);
         }
+        // A session that quit mid-import leaves its whole Unity project behind (2.5 GB in one folder, 2026-10-11).
+        foreach (var stale in Directory.GetDirectories(folder).Select(Path.GetFileName).Where(n => n!.StartsWith("Work-") || n.StartsWith("Attempt-")))
+            await RemoveOwned(folder,Path.Combine(folder,stale!),stale!);
         // A valid cached map can load on computers which do not have Unity installed.
         var editor = FindEditor(configuredEditor) ?? throw new EditorUnavailableException("Automatic map import needs Unity " + MapImportSource.UnityVersion + " installed. Ready-made map bundles still work.");
         token.ThrowIfCancellationRequested();
-        var id = Guid.NewGuid().ToString("N");
+        var id = Guid.NewGuid().ToString("N")[..8];
         var project = Path.Combine(folder,"Work-" + id);
         var attempt = Path.Combine(folder,"Attempt-" + id);
         var input = Path.Combine(project,"Assets","Input");
@@ -78,7 +83,7 @@ internal static class MapImportConversion
         try
         {
             progress("Unpacking map and textures");
-            MapImportSource.Stage(source,input,token);
+            MapImportSource.Stage(source,input,token,message => Plugin.ModLog.LogInfo(message));
             if (MapImportSource.Fingerprint(source,token) != fingerprint) throw new InvalidOperationException("The map changed while it was being imported. Try again after saving its files.");
             Directory.CreateDirectory(Path.Combine(project,"Assets","Editor"));
             Directory.CreateDirectory(Path.Combine(project,"Packages"));
@@ -90,7 +95,7 @@ internal static class MapImportConversion
             var start = new ProcessStartInfo(editor) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = project };
             foreach (var arg in new[] { "-batchmode", "-nographics", "-quit", "-projectPath", project,
                 "-executeMethod", "SprocketAutoMapExport.Build", "-logFile", log, "-sprocketOutput", attempt, "-sprocketMap", name,
-                "-sprocketDisplayName", Directory.Exists(source) ? Path.GetFileName(Path.TrimEndingDirectorySeparator(source)) : Path.GetFileNameWithoutExtension(source) }) start.ArgumentList.Add(arg);
+                "-sprocketDisplayName", MapImportSource.DisplayName(source) }) start.ArgumentList.Add(arg);
             if (!Directory.Exists(source) && MapImportSource.Model(source))
             {
                 start.ArgumentList.Add("-sprocketModel");
@@ -99,6 +104,8 @@ internal static class MapImportConversion
             progress("Converting map in the background");
             token.ThrowIfCancellationRequested();
             process = Process.Start(start) ?? throw new InvalidOperationException("Unity could not start the automatic map conversion.");
+            // It runs while people play: the game keeps the CPU first (Unity's shader compilers inherit this).
+            try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromMinutes(15));
             try
@@ -155,6 +162,25 @@ internal static class MapImportConversion
                 await RemoveOwned(folder,project,"Work-" + id);
                 await RemoveOwned(folder,attempt,"Attempt-" + id);
             }
+        }
+    }
+    /// Earlier conversions of the same map (older map files or importer versions) are never used again. Called once the
+    /// new one is registered; one whose bundle the game still holds open stays (deleting it fails) and goes next time.
+    internal static void RemoveOlder(string bundle)
+    {
+        var folder = Path.GetDirectoryName(Path.GetDirectoryName(bundle))!;
+        var name = Path.GetFileNameWithoutExtension(bundle);
+        foreach (var other in Directory.GetDirectories(Path.GetDirectoryName(folder)!))
+        {
+            if (string.Equals(other,folder,StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                var log = Path.Combine(other,"import.log");
+                if (!File.Exists(Path.Combine(other,"Output",name + ".bundle"))
+                    && !(File.Exists(log) && File.ReadLines(log).Take(400).Any(line => line.Contains(name,StringComparison.Ordinal)))) continue;
+                Directory.Delete(other,true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }
     static async Task<FileStream> Lock(string folder, CancellationToken token)
