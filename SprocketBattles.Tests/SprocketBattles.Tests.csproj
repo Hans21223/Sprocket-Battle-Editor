@@ -39,6 +39,7 @@
     <Compile Include="..\SprocketMaps\MapImportSource.cs" Link="MapImportSource.cs" />
     <Compile Include="..\SprocketMaps\MapImportConversion.cs" Link="MapImportConversion.cs" />
     <Compile Include="..\SprocketMaps\MapImportDiscovery.cs" Link="MapImportDiscovery.cs" />
+    <Compile Include="..\SprocketMaps\SourceMaps.cs" Link="SourceMaps.cs" />
     <EmbeddedResource Include="..\SprocketMaps\Import\SprocketAutoMapExport.cs.txt" LogicalName="SprocketMaps.AutoMapExporter" WithCulture="false" />
     <PackageReference Include="SharpCompress" Version="0.50.4" />
   </ItemGroup>

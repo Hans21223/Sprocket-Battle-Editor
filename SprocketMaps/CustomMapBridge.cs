@@ -411,7 +411,12 @@ internal static class CustomMapBridge
     static (Vector2 A, Vector2 D) SpawnAnchors(Session s)
     {
         var shoved = s.Destructibles.Where(item => item.Object).SelectMany(item => item.Object.GetComponentsInChildren<Collider>(true))
-            .Where(collider => collider.enabled).ToArray();
+            .Where(collider => collider.enabled)
+            // So are the carrier's colliders still standing: its world-bounds walls are fitted to the map only after this,
+            // and gm_1993 (826 m wide) had a start 14 m inside Sandbox's wall. The importer saw only the map.
+            .Concat(UnityEngine.Object.FindObjectsOfType<Collider>().Where(collider => collider.enabled && !collider.isTrigger
+                && !collider.transform.IsChildOf(s.Environment!.transform)))
+            .ToArray();
         foreach (var collider in shoved) collider.enabled = false;
         Physics.SyncTransforms();
         try { return OpenSpawnAnchors(s); }
@@ -454,6 +459,7 @@ internal static class CustomMapBridge
         }
         // Teams start 100 m apart, or half the map's width on a smaller map (as the importer checked).
         float apart = Math.Min(100, 0.5f * Math.Max(bounds.size.x, bounds.size.z));
+        string why = "";
         bool TeamClear(Vector3 at, Vector3 toward)
         {
             var direction = toward - at; direction.y = 0;
@@ -463,14 +469,15 @@ internal static class CustomMapBridge
             {
                 var offset = SpawnFormation.Offset(s.Definition.Map.Spawns, i, SpawnSpacing);
                 var place = at + side * offset.Side + back * offset.Back;
-                if (!GroundAt(place.x, place.z, out var ground)
-                    || Math.Abs(ground.y - at.y) > 1
-                    || Physics.CheckBox(ground + Vector3.up * 3, new Vector3(2, 2.4f, 4.5f), facing, ~0, QueryTriggerInteraction.Ignore)) return false; // a tank's room: 4 x 9 m
+                if (!GroundAt(place.x, place.z, out var ground)) { why = $"tank {i} at {place}: no drivable ground"; return false; }
+                if (Math.Abs(ground.y - at.y) > 1) { why = $"tank {i} at {place}: ground {ground.y - at.y:0.0} m off level"; return false; }
+                var blocking = Physics.OverlapBox(ground + Vector3.up * 3, new Vector3(2, 2.4f, 4.5f), facing, ~0, QueryTriggerInteraction.Ignore); // a tank's room: 4 x 9 m
+                if (blocking.Length > 0) { why = $"tank {i} at {place}: space taken by '{blocking[0].name}'"; return false; }
                 for (int x = -1; x <= 1; x += 2)
                     for (int z = -1; z <= 1; z += 2)
                     {
                         var corner = place + side * (x * 2) + back * (z * 4.5f);
-                        if (!SupportAt(corner.x, corner.z, out var supported) || Math.Abs(supported.y - ground.y) > 0.5f) return false;
+                        if (!SupportAt(corner.x, corner.z, out var supported) || Math.Abs(supported.y - ground.y) > 0.5f) { why = $"tank {i} at {place}: a corner has no level ground"; return false; }
                     }
             }
             return true;
@@ -483,17 +490,23 @@ internal static class CustomMapBridge
         bool ValidPair(Vector3 p, Vector3 q, out Vector3 first, out Vector3 second)
         {
             first = FrontRow(p, q); second = FrontRow(q, p);
-            if ((p - q).sqrMagnitude < apart * apart || !TeamClear(first, second) || !TeamClear(second, first)) return false;
-            return navigation.Connects(p, q);
+            if ((p - q).sqrMagnitude < apart * apart) { why = $"starts {(p - q).magnitude:0} m apart, {apart:0} m needed"; return false; }
+            if (!TeamClear(first, second) || !TeamClear(second, first)) return false;
+            if (navigation.Connects(p, q)) return true;
+            why = "no tank route between the starts"; return false;
         }
         var transforms = s.Environment!.GetComponentsInChildren<Transform>(true);
         var authoredA = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area A");
         var authoredD = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area B");
-        if (authoredA != null && authoredD != null
-            && GroundAt(authoredA.position.x, authoredA.position.z, out var pa)
-            && GroundAt(authoredD.position.x, authoredD.position.z, out var pd)
-            && ValidPair(pa, pd, out var startA, out var startD))
-            return (new Vector2(startA.x, startA.z), new Vector2(startD.x, startD.z));
+        if (authoredA != null && authoredD != null)
+        {
+            if (GroundAt(authoredA.position.x, authoredA.position.z, out var pa) && GroundAt(authoredD.position.x, authoredD.position.z, out var pd))
+            {
+                if (ValidPair(pa, pd, out var startA, out var startD)) return (new Vector2(startA.x, startA.z), new Vector2(startD.x, startD.z));
+            }
+            else why = "a starting area has no drivable ground";
+            Plugin.ModLog.LogWarning($"'{s.Definition.Identifier}': the map's starting areas don't pass here ({why}); searching the map instead.");
+        }
         var min = bounds.min; var max = bounds.max;
         for (int z = 1; z <= 31; z++)
             for (int x = 1; x <= 31; x++)

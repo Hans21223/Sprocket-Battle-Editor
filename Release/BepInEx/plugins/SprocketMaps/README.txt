@@ -1,10 +1,12 @@
-Map Framework 0.5.0 (Alpha)
+Map Framework 1.0.0 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
-For Sprocket 0.2.56 with the Sprocket Mod Loader (BepInEx 6 IL2CPP). Unity remains 6000.3.21f1.
-New in 0.5.0 (details in CHANGELOG.md and docs/Making-Custom-Maps.html in the repository):
+For Sprocket 0.2.55.5 and 0.2.56 with the Sprocket Mod Loader (BepInEx 6 IL2CPP). Unity remains 6000.3.21f1.
+New since 0.4.1 (details in CHANGELOG.md and docs/Making-Custom-Maps.html in the repository):
 - Garry's Mod maps: put a workshop addon (.gma) or a .bsp in CustomMaps. It is converted with its props and
   textures (stock textures come from your Garry's Mod install, found through Steam) and listed under its own name.
+  An old workshop item (<number>_legacy.bin) or a whole workshop item folder works too. Props collide as in Garry's
+  Mod: with their collision model, their box, or not at all.
 - Maps keep their own lighting: baked lightmaps, glowing materials, sky, fog and lamps (lamp distance and brightness
   under Lighting in local.sprocket.maps.cfg).
 - Water surfaces, breakable scenery and trees, and Map Framework's own map shaders (sprocketmaps.shaders).

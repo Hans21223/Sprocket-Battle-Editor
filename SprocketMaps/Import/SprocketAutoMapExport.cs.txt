@@ -141,6 +141,9 @@ public static class SprocketAutoMapExport
                 if (IsGround(filter)) report.addedGroundColliders++;
                 else report.addedStructureColliders++;
             }
+            // A "Sprocket Collision" object is a shape to collide with, never drawn (a prop's collision model).
+            foreach (var renderer in Components<MeshRenderer>(source).Where(r => r.name.StartsWith("Sprocket Collision", StringComparison.Ordinal)).ToArray())
+                UnityEngine.Object.DestroyImmediate(renderer);
 
             foreach (var root in source.GetRootGameObjects())
                 if (root.GetComponentsInChildren<MonoBehaviour>(true).Length != 0)
@@ -150,7 +153,8 @@ public static class SprocketAutoMapExport
             if (!EditorSceneManager.SaveScene(source, ExportScene)) throw new IOException("Could not save separate export scene.");
             AssetDatabase.Refresh();
             Physics.SyncTransforms();
-            var solids = Components<Collider>(source).Where(c => c.enabled && !c.isTrigger && c.gameObject.activeInHierarchy && !Destructible(c.transform)).ToArray();
+            var solids = Components<Collider>(source).Where(c => c.enabled && !c.isTrigger && c.gameObject.activeInHierarchy && !Destructible(c.transform)
+                && !(c is MeshCollider empty && (empty.sharedMesh == null || empty.sharedMesh.vertexCount == 0))).ToArray();
             if (solids.Length == 0) throw new InvalidOperationException("The map has no solid ground or geometry.");
             var bounds = solids[0].bounds;
             foreach (var collider in solids.Skip(1)) bounds.Encapsulate(collider.bounds);
@@ -166,7 +170,13 @@ public static class SprocketAutoMapExport
                 Components<Transform>(source).Where(t => Marked(t.name)).Select(t => new NavMeshBuildMarkup { root = t, ignoreFromBuild = true }).ToList(),
                 source, sources);
             report.navigationSources = sources.Count;
-            if (sources.Count != solids.Length) throw new InvalidOperationException("Navigation did not collect every repaired solid collider: " + sources.Count + " / " + solids.Length);
+            if (sources.Count != solids.Length)
+            {
+                var collected = new HashSet<Component>(sources.Select(x => x.component).Where(c => c != null));
+                var missed = solids.Where(c => !collected.Contains(c)).Take(5).Select(c => c.name + " (" + c.GetType().Name
+                    + (c is MeshCollider m && m.sharedMesh ? ", " + m.sharedMesh.vertexCount + " points, " + m.sharedMesh.triangles.Length / 3 + " triangles, size " + m.sharedMesh.bounds.size : "") + ")");
+                throw new InvalidOperationException("Navigation did not collect every repaired solid collider: " + sources.Count + " / " + solids.Length + "; missed: " + string.Join(", ", missed));
+            }
             foreach (var buildSource in sources)
                 if (buildSource.sourceObject is Mesh mesh && !mesh.isReadable)
                     throw new InvalidOperationException("Runtime navigation would omit unreadable mesh: " + mesh.name);
@@ -366,7 +376,11 @@ public static class SprocketAutoMapExport
     // Breakables and trees give way under tanks in the game (Destructibles), so they don't block tank navigation.
     static bool Marked(string name) => name.StartsWith("Sprocket Breakable", StringComparison.Ordinal) || name.StartsWith("Sprocket Tree", StringComparison.Ordinal);
     static bool Destructible(Transform t) { for (; t != null; t = t.parent) if (Marked(t.name)) return true; return false; }
-    static bool IncludeCollision(MeshFilter filter) => filter.sharedMesh != null && !filter.name.StartsWith("Sprocket Water Surface", StringComparison.Ordinal);
+    // An empty mesh (Unity drops zero-area faces, so a group of only those comes out empty) collides with nothing and
+    // navigation skips it: no collider for it (Berlin 1944: "1308 / 1309").
+    // "Sprocket Visual" objects are only drawn (their collision is a "Sprocket Collision" object, or none).
+    static bool IncludeCollision(MeshFilter filter) => filter.sharedMesh != null && filter.sharedMesh.vertexCount > 0
+        && !filter.name.StartsWith("Sprocket Water Surface", StringComparison.Ordinal) && !filter.name.StartsWith("Sprocket Visual", StringComparison.Ordinal);
     static void Marker(Scene scene, string name, Vector3 at)
     {
         var existing = Components<Transform>(scene).FirstOrDefault(t => t.name == name);
@@ -468,7 +482,7 @@ public static class SprocketAutoMapExport
     }
     // Names Map Framework reads. Unity's OBJ importer turns spaces in group names into underscores
     // ("Sprocket_Water_Surface"), so those are named back.
-    static readonly string[] MarkerNames = { "Sprocket Water Surface", "Sprocket Breakable", "Sprocket Tree", "Sprocket Spawn Area A", "Sprocket Spawn Area B", "Sprocket Game Lighting" };
+    static readonly string[] MarkerNames = { "Sprocket Water Surface", "Sprocket Breakable", "Sprocket Tree", "Sprocket Spawn Area A", "Sprocket Spawn Area B", "Sprocket Game Lighting", "Sprocket Visual", "Sprocket Collision" };
     static void Sanitize(Scene scene)
     {
         foreach (var transform in Components<Transform>(scene))

@@ -11,7 +11,7 @@ namespace SprocketMaps;
 [BepInPlugin("local.sprocket.maps", "Map Framework", Version)]
 public sealed class Plugin : BasePlugin
 {
-    const string Version = "0.5.0";
+    const string Version = "1.0.0";
 
     internal static ManualLogSource ModLog = null!;
     internal static bool DestructibleTreesOff; // the tree effect guard could not be installed

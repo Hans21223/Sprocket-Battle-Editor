@@ -2,7 +2,7 @@
   <Import Project="..\SprocketMod.props" />
   <PropertyGroup>
     <AssemblyName>SprocketBattles</AssemblyName>
-    <Version>0.17.32</Version>
+    <Version>0.18.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <!-- Sprocket Mod API, optional at run time (ModApi.cs): compiled against the copy in lib\, never shipped with the mod. -->

@@ -1,9 +1,11 @@
-Sprocket Battle Editor 0.17.32 + Map Framework 0.5.0 - for Sprocket 0.2.56 (Alpha)
+Sprocket Battle Editor 0.18.0 + Map Framework 1.0.0 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
+0.18.0: runs on Sprocket 0.2.55.5 and 0.2.56. Map Framework 1.0.0 imports Garry's Mod maps safely (a damaged
+collision model can't hang the import).
 0.17.32: the New battle map picker lists maps imported in the background without a restart, and tanks start on
 the surface nearest where they were placed (not on top of a lamp post or roof above them).
-Map Framework 0.5.0: Garry's Mod maps (.gma/.bsp), maps keep their own lighting, water, breakable scenery; see
+Map Framework 1.0.0 (0.5.0's features): Garry's Mod maps (.gma/.bsp), maps keep their own lighting, water, breakable scenery; see
 SprocketMaps\README.txt.
 0.17.31: with the optional Sprocket Mod API (github.com/furryaxw/SprocketModAPI) installed, F9 and F10 can be
 rebound in its keybinding window and Battle Editor is listed in its Mod menu. Without the API: no change.

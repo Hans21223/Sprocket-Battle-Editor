@@ -1,4 +1,18 @@
-# Battle Editor 0.17.32 (local)
+# Battle Editor 0.18.0 + Map Framework 1.0.0 (Beta)
+
+Runs on Sprocket 0.2.55.5 and 0.2.56: both plugins compile against both versions' interop, so every Harmony patch
+target and game member they use is in each. This release collects Battle Editor 0.17.32 and Map Framework 0.5.0
+below, plus what a full scan before release found:
+
+- Map Framework: a damaged collision model (.phy) in a Garry's Mod map can no longer hang the import (its tree walk
+  is bounded), and a map's material and model names can't read files outside Garry's Mod's own folders (`..`).
+- Map Framework's import code no longer names the plugin's logger directly (the conversion takes a log callback),
+  so the offline tests build with it again; SourceMaps.cs is part of the tests, and the cache test uses the
+  shorter cache key.
+- README and guides: Sprocket 0.2.55.5 and 0.2.56, Garry's Mod maps, and the current start-area rules (a 4 x 9 m
+  tank box with level ground under its corners; teams 100 m apart, or half the map's width on a smaller map).
+
+# Battle Editor 0.17.32
 
 - The New battle map picker reads the map list again each time it opens. Before, the list was read once per
   session, so a map Map Framework finished importing in the background (or any map added later) only appeared
@@ -8,7 +22,7 @@
   "tanks in the sky" in editor Play on Poland); indoors, tanks could start on the roof. Measured in game: the
   Poland tank now starts at the normal 2.5 m drop height and settles on the street.
 
-# Map Framework 0.5.0 (local map test)
+# Map Framework 0.5.0
 
 - Garry's Mod maps import automatically: put a workshop addon (`.gma`) or a map (`.bsp`) in CustomMaps. Map
   Framework converts it to an OBJ with its textures (SourceMaps.cs), which Unity then imports like any other, and
@@ -22,6 +36,15 @@
     game's water; props under about 15 m across and physics props become breakables;
   - LZMA-compressed lumps (later Source branches) are unpacked;
   - texture file names are at most 60 characters (a short hash replaces the rest);
+  - props collide as in the game: with their collision model (.phy), their box, or not at all, as the map set each
+    one. Before, every prop collided with its whole drawn shape, so gm_bor's forest (16 tiles of tree clusters,
+    215 m across) was a solid wall of leaves and no tank could start; it now imports with 8 a side. A prop that
+    should use a collision model but has none isn't solid, as in the game;
+  - old workshop items (`<number>_legacy.bin`, an LZMA-compressed addon) import too, and a workshop item's folder
+    copied whole is read as its map: every addon is called gmpublisher.gma, so a second one copied loose replaced
+    the first;
+  - each corner is written once per object: Berlin 1944's conversion went from 10.9 million vertices (961 MB) to
+    3.5 million (579 MB);
   - 1 unit = 1 inch. Checked against the Python converter it was ported from: gm_construct and gm_sakura come out
     identical (vertices, objects, materials; texture pixels within 1). gm_bigcity_improved_rp converts in 6.5 s and
     passes the import with 16 tanks a side.
@@ -97,6 +120,8 @@
   - `-sprocketScale <k>` scales a whole scene about the origin (and its light ranges, reflection probes and
     terrain) for scenery modelled smaller or larger than life. Akihabara is a 1/8.5 miniature (0.5 m cars).
 - An OBJ material with an alpha map (`map_d`) is cut out by its texture's alpha (grates, fences, foliage cards).
+- Two more names: an object named "Sprocket Visual" is only drawn (no collision), and one named "Sprocket
+  Collision" is only collided with (never drawn), so a model can carry a simpler collision shape.
 - Map Framework's object names survive OBJ import: Unity's OBJ importer turns spaces in group names into
   underscores, so "Sprocket Water Surface", "Sprocket Breakable", "Sprocket Tree", the spawn areas and "Sprocket Game
   Lighting" were never recognised in OBJ maps (gm_construct's lake stayed a solid blue sheet). They're named back.
@@ -106,7 +131,10 @@
 - Starting positions fit town maps, both in the importer and in the check the game runs when the map loads (that
   one still asked for 100 m and rejected gm_sakura's 97 m starts, which took the map off the list). The game's
   check also sets breakables and trees aside while it looks, as the importer does: by then they are physics bodies
-  with their colliders on, and every bike and sign counted as a wall:
+  with their colliders on, and every bike and sign counted as a wall. It sets the carrier's own colliders aside too:
+  its world-bounds walls are fitted to the map only afterwards, so a map wider than Sandbox (gm_1993, 826 m) had its
+  starts rejected and the fallback search ran out of queries. When the map's starting areas don't pass, the log
+  says why:
   - the teams start 100 m apart, or half the map's width when it's smaller;
   - each tank needs a clear tank-sized space (4 x 9 m along its facing) with level ground under its corners, instead
     of an 8 m square whose corners also had to be on tank navigation. Navigation keeps a tank's radius from walls,

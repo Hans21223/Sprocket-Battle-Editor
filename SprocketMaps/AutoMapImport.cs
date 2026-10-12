@@ -63,7 +63,7 @@ internal static class AutoMapImport
             status = "Preparing map import";
             Plugin.ModLog.LogInfo("Automatic map import starting: " + next.Source);
             running = Task.Run(() => MapImportConversion.Convert(next.Source,cache,editorPath,template,
-                value => { if (!importToken.IsCancellationRequested) status = value; },importToken),importToken);
+                value => { if (!importToken.IsCancellationRequested) status = value; },importToken,Plugin.ModLog.LogInfo),importToken);
         }
         catch (Exception ex)
         {

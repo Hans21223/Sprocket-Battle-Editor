@@ -17,7 +17,7 @@ if (args.Length == 2 && args[0] == "--verify-plugin")
 if (args.Length == 4 && args[0] == "--import-map")
 {
     var imported = await SprocketMaps.MapImportConversion.Convert(args[1], args[2],
-        args[3], SprocketMaps.MapImportConversion.Template(), Console.WriteLine, CancellationToken.None);
+        args[3], SprocketMaps.MapImportConversion.Template(), Console.WriteLine, CancellationToken.None, Console.WriteLine);
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(imported));
     return;
 }

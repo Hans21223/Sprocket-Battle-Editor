@@ -1,4 +1,4 @@
-Sprocket Battle Editor 0.17.31 - for Sprocket 0.2.56.0 (Alpha)
+Sprocket Battle Editor 0.18.0 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 INSTALL
@@ -6,8 +6,8 @@ Needs the Sprocket Mod Loader (BepInEx 6 IL2CPP). Add the zip in Sprocket Mod Ma
 into the Sprocket folder. This package contains Battle Editor only. Install Map Framework separately to add
 Ambush, The Crossroad, Silent Border, Sandbox and Sandbox (Low performance), or to import your own map sources.
 
-Rebuilt against fresh Sprocket 0.2.56.0 interop. Offline regression, patch-target and native ABI checks pass.
-In-game testing remains pending. No game files or loader files are included.
+Compiles against both Sprocket 0.2.55.5 and 0.2.56 interop; offline regression checks pass. Parts are still
+untested in game (see the README). No game files or loader files are included.
 With the optional Sprocket Mod API installed, F9 and F10 can be rebound in its keybinding window.
 
 USE

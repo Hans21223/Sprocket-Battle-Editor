@@ -96,7 +96,7 @@ static class MapImportTests
             }
             var template=MapImportConversion.Template();
             var cache=Path.Combine(root,"cache");
-            var cacheKey=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(nested).ToUpperInvariant()+MapImportSource.Fingerprint(nested)+template))).ToLowerInvariant();
+            var cacheKey=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(nested).ToUpperInvariant()+MapImportSource.Fingerprint(nested)+template)))[..32].ToLowerInvariant();
             var output=Path.Combine(cache,cacheKey,"Output");Directory.CreateDirectory(output);
             var cachedBundle=Path.Combine(output,MapImportSource.SceneName(nested)+".bundle"); File.WriteAllText(cachedBundle,"valid cached bundle");
             File.WriteAllText(Path.ChangeExtension(cachedBundle,".json"),"{\"schemaVersion\":1,\"spawnCount\":2}");

@@ -37,7 +37,12 @@ internal static class MapImportDiscovery
                         if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                         if ((attributes & FileAttributes.Directory) != 0)
                         {
-                            if (MapImportSource.Files(entry,token).Any(p => MapImportSource.Supported(p) || Scene(p))) Add(entry);
+                            var inside = MapImportSource.Files(entry,token).ToList();
+                            // A Garry's Mod workshop item's folder (<id>\gmpublisher.gma): every addon has that name, so
+                            // copying the folders is how two of them can sit side by side. Each map in it is a source.
+                            if (inside.Any(SourceMaps.Is) && !inside.Any(p => MapImportSource.Archive(p) || MapImportSource.Model(p) || Scene(p)))
+                                foreach (var map in inside.Where(SourceMaps.Is)) Add(map);
+                            else if (inside.Any(p => MapImportSource.Supported(p) || Scene(p))) Add(entry);
                         }
                         else if (MapImportSource.Supported(entry)) Add(entry);
                         else if (Scene(entry)) Add(root);

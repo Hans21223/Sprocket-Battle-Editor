@@ -47,7 +47,7 @@ internal static class MapImportConversion
         return reader.ReadToEnd();
     }
     internal static async Task<Result> Convert(string source, string cache, string configuredEditor, string template,
-        Action<string> progress, CancellationToken token)
+        Action<string> progress, CancellationToken token, Action<string>? detail = null)
     {
         source = Path.GetFullPath(source);
         progress("Checking map files");
@@ -83,7 +83,7 @@ internal static class MapImportConversion
         try
         {
             progress("Unpacking map and textures");
-            MapImportSource.Stage(source,input,token,message => Plugin.ModLog.LogInfo(message));
+            MapImportSource.Stage(source,input,token,detail);
             if (MapImportSource.Fingerprint(source,token) != fingerprint) throw new InvalidOperationException("The map changed while it was being imported. Try again after saving its files.");
             Directory.CreateDirectory(Path.Combine(project,"Assets","Editor"));
             Directory.CreateDirectory(Path.Combine(project,"Packages"));

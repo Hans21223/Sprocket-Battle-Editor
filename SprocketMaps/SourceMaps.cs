@@ -17,15 +17,24 @@ namespace SprocketMaps;
 internal static class SourceMaps
 {
     /// Part of the import fingerprint of these maps: a change here converts them again.
-    internal const string Version = "2";
+    internal const string Version = "5";
     const float Scale = .0254f;
 
-    internal static bool Is(string path) => Path.GetExtension(path).ToLowerInvariant() is ".gma" or ".bsp" && !Directory.Exists(path);
+    internal static bool Is(string path) => (Path.GetExtension(path).ToLowerInvariant() is ".gma" or ".bsp" && !Directory.Exists(path)) || IsLegacy(path);
+
+    /// An old workshop item, stored by Steam as <id>_legacy.bin: an addon, LZMA-compressed (it starts with the usual
+    /// LZMA settings byte).
+    static bool IsLegacy(string path)
+    {
+        if (!Path.GetExtension(path).Equals(".bin", StringComparison.OrdinalIgnoreCase) || !File.Exists(path)) return false;
+        try { using var file = File.OpenRead(path); return file.ReadByte() == 0x5D; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
 
     /// The map's own name (an addon's map file, as workshop addons are all called gmpublisher.gma).
     internal static string MapName(string path)
     {
-        if (!Path.GetExtension(path).Equals(".gma", StringComparison.OrdinalIgnoreCase)) return Path.GetFileNameWithoutExtension(path);
+        if (Path.GetExtension(path).Equals(".bsp", StringComparison.OrdinalIgnoreCase)) return Path.GetFileNameWithoutExtension(path);
         try { return Path.GetFileNameWithoutExtension(new Addon(path).MapFile ?? path); }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { return Path.GetFileNameWithoutExtension(path); }
     }
@@ -57,16 +66,18 @@ internal static class SourceMaps
     }
     static string? SteamPath() => Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath", null) is string s ? s.Replace('/', '\\') : null;
 
-    /// A Garry's Mod addon: a header, a file list, then the files back to back.
+    /// A Garry's Mod addon: a header, a file list, then the files back to back (a legacy one LZMA-compressed).
     sealed class Addon
     {
-        readonly string path;
+        readonly string path; readonly bool legacy;
+        byte[]? unpacked;
         internal readonly Dictionary<string, (long Offset, long Size)> Files = new();
         internal string? MapFile => Files.Keys.Where(n => n.StartsWith("maps/") && n.EndsWith(".bsp")).OrderBy(n => n, StringComparer.Ordinal).FirstOrDefault();
         internal Addon(string path)
         {
-            this.path = path;
-            using var stream = File.OpenRead(path);
+            this.path = path; legacy = IsLegacy(path);
+            // Only the header is read here: a legacy addon is unpacked just that far.
+            using var stream = new Counting(legacy ? Unlzma(path, out _) : File.OpenRead(path));
             var reader = new BinaryReader(stream);
             if (Encoding.ASCII.GetString(reader.ReadBytes(4)) != "GMAD") throw new InvalidDataException("This is not a Garry's Mod addon.");
             int version = reader.ReadByte();
@@ -81,14 +92,27 @@ internal static class SourceMaps
                 if (size < 0 || entries.Count > 200000) throw new InvalidDataException("The addon's file list is damaged.");
                 entries.Add((name, size));
             }
-            long offset = stream.Position;
+            long offset = stream.Count;
             foreach (var (name, size) in entries) { Files[name] = (offset, size); offset += size; }
-            if (offset > stream.Length) throw new InvalidDataException("The addon is cut short.");
+            if (!legacy && offset > new FileInfo(path).Length) throw new InvalidDataException("The addon is cut short.");
         }
         internal byte[] Read(string name)
         {
             var (offset, size) = Files[name];
             if (size > int.MaxValue) throw new InvalidDataException("An addon file is too large: " + name);
+            if (legacy)
+            {
+                // ponytail: the whole addon in memory (an old map: about 180 MB), as LZMA can't be read out of order.
+                if (unpacked == null)
+                {
+                    using var lzma = Unlzma(path, out long total);
+                    if (total is < 0 or > int.MaxValue) throw new InvalidDataException("The legacy addon doesn't say its size.");
+                    unpacked = new byte[total];
+                    Fill(lzma, unpacked, 0, unpacked.Length);
+                }
+                if (offset + size > unpacked.Length) throw new InvalidDataException("The addon is cut short.");
+                return unpacked.AsSpan((int)offset, (int)size).ToArray();
+            }
             using var stream = File.OpenRead(path);
             stream.Seek(offset, SeekOrigin.Begin);
             var data = new byte[size];
@@ -102,6 +126,37 @@ internal static class SourceMaps
                 if (bytes.Count < 65536) bytes.Add(b); else throw new InvalidDataException("The addon's header is damaged.");
             return Encoding.UTF8.GetString(bytes.ToArray());
         }
+    }
+
+    /// A legacy addon's content as it unpacks: 5 bytes of LZMA settings, the unpacked size (64 bits), then the data.
+    static Stream Unlzma(string path, out long size)
+    {
+        var file = File.OpenRead(path);
+        var head = new byte[13];
+        Fill(file, head, 0, head.Length);
+        size = BinaryPrimitives.ReadInt64LittleEndian(head.AsSpan(5));
+        // No input length: the compressed data needn't fill the file, and with the file's length the decoder stopped
+        // with "Data Error" 60 KB before the end (rp_1944berlin).
+        return LzmaStream.Create(head[..5], file, -1, size, false);
+    }
+
+    /// Counts what's read, for a stream that can't tell its position (a header read through LZMA).
+    sealed class Counting : Stream
+    {
+        readonly Stream inner;
+        internal long Count;
+        internal Counting(Stream inner) => this.inner = inner;
+        public override int Read(byte[] buffer, int offset, int count) { int n = inner.Read(buffer, offset, count); Count += n; return n; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => Count; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing) { if (disposing) inner.Dispose(); base.Dispose(disposing); }
     }
 
     /// A Valve pak (VPK) directory and its numbered archives.
@@ -161,6 +216,7 @@ internal static class SourceMaps
         internal byte[]? Read(string name)
         {
             name = name.Replace('\\', '/').ToLowerInvariant();
+            if (name.Contains("..")) return null; // a map's names never leave the game's folders
             if (addon != null && addon.Files.ContainsKey(name)) return addon.Read(name);
             if (packed.TryGetValue(name, out var entry))
             {
@@ -173,6 +229,7 @@ internal static class SourceMaps
         internal bool Has(string name)
         {
             name = name.Replace('\\', '/').ToLowerInvariant();
+            if (name.Contains("..")) return false;
             return addon?.Files.ContainsKey(name) == true || packed.ContainsKey(name) || loose.Any(g => File.Exists(Path.Combine(g, name))) || vpks.Any(v => v.Files.ContainsKey(name));
         }
         public void Dispose() => pak.Dispose();
@@ -444,6 +501,63 @@ internal static class SourceMaps
         return new(triangles, MaterialOf);
     }
 
+    const string CollisionMaterial = "sprocket_collision";
+
+    /// A model's collision shape from its .phy, as outward-facing triangles in model space (inches); null without one.
+    /// A .phy holds convex pieces ("ledges") in IVP's units: metres, with Source's (x, y, z) as IVP's (x, -z, y). Its
+    /// ledge tree is walked to find them (28-byte nodes; a node without a right child names one ledge). Only the first
+    /// solid: a static prop has one; a ragdoll's others hang on bones.
+    static List<Vector[]>? LoadCollision(Content content, string name)
+    {
+        var d = content.Read(name[..^4] + ".phy");
+        if (d == null || d.Length < 20 || I32(d, 8) < 1) return null;
+        int q = I32(d, 0) + 4;
+        int surface = q + (Encoding.ASCII.GetString(d, q, 4) == "VPHY" ? 28 : 0);
+        var triangles = new List<Vector[]>();
+        var nodes = new Stack<int>();
+        nodes.Push(surface + I32(d, surface + 32));
+        // A damaged tree can point back into itself: the walk is bounded, or it would never end.
+        for (int steps = 0; nodes.Count > 0 && triangles.Count < 200000; )
+        {
+            if (++steps > 100000) throw new InvalidDataException("The collision model's tree is damaged: " + name);
+            int node = nodes.Pop(), right = I32(d, node);
+            if (right != 0) { nodes.Push(node + 28); nodes.Push(node + right); continue; }
+            int ledge = node + I32(d, node + 4), points = ledge + I32(d, ledge), count = I16(d, ledge + 12);
+            var piece = new List<Vector[]>();
+            for (int t = 0; t < count; t++)
+                piece.Add(Enumerable.Range(0, 3).Select(k =>
+                {
+                    var v = Vec(d, points + 16 * U16(d, ledge + 16 + 16 * t + 4 + 4 * k));
+                    return new Vector(v.X, v.Z, -v.Y) * (1 / Scale);
+                }).ToArray());
+            // Each piece is convex: its triangles face away from its middle (raycasts only hit front faces).
+            var middle = piece.SelectMany(x => x).Aggregate(default(Vector), (a, b) => a + b) * (1f / Math.Max(1, 3 * piece.Count));
+            foreach (var tri in piece)
+            {
+                if (Vector.Dot(Vector.Cross(tri[1] - tri[0], tri[2] - tri[0]), tri[0] + tri[1] + tri[2] - middle * 3) < 0) (tri[1], tri[2]) = (tri[2], tri[1]);
+                triangles.Add(tri);
+            }
+        }
+        return triangles.Count > 0 ? triangles : null;
+    }
+
+    /// The box around some points, as 12 outward-facing triangles.
+    static List<Vector[]> Box(IEnumerable<Vector> points)
+    {
+        var all = points.ToList();
+        var lo = all.Aggregate(Vector.Min); var hi = all.Aggregate(Vector.Max);
+        Vector C(int i) => new((i & 1) != 0 ? hi.X : lo.X, (i & 2) != 0 ? hi.Y : lo.Y, (i & 4) != 0 ? hi.Z : lo.Z);
+        var middle = (lo + hi) * .5f;
+        var box = new List<Vector[]>();
+        foreach (var (a, b, c, e) in new[] { (0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5) })
+            foreach (var tri in new[] { new[] { C(a), C(b), C(c) }, new[] { C(a), C(c), C(e) } })
+            {
+                if (Vector.Dot(Vector.Cross(tri[1] - tri[0], tri[2] - tri[0]), tri[0] + tri[1] + tri[2] - middle * 3) < 0) (tri[1], tri[2]) = (tri[2], tri[1]);
+                box.Add(tri);
+            }
+        return box;
+    }
+
     /// Source's AngleMatrix (degrees, pitch yaw roll): rows of the rotation from model axes to world axes.
     static Vector[] AngleMatrix(float pitch, float yaw, float roll)
     {
@@ -460,7 +574,7 @@ internal static class SourceMaps
         Addon? addon = null;
         byte[] b;
         string mapName;
-        if (Path.GetExtension(source).Equals(".gma", StringComparison.OrdinalIgnoreCase))
+        if (!Path.GetExtension(source).Equals(".bsp", StringComparison.OrdinalIgnoreCase)) // an addon: .gma, or a legacy .bin
         {
             addon = new Addon(source);
             var map = addon.MapFile ?? throw new InvalidDataException("This Garry's Mod addon has no map (maps/*.bsp).");
@@ -629,13 +743,15 @@ internal static class SourceMaps
                 // The whole outline's normal (Newell): faces often start with three corners in a line.
                 var newell = default(Vector);
                 for (int k = 0; k < poly.Count; k++) { var p = poly[k]; var q = poly[(k + 1) % poly.Count]; newell += new Vector((p.Y - q.Y) * (p.Z + q.Z), (p.Z - q.Z) * (p.X + q.X), (p.X - q.X) * (p.Y + q.Y)); }
+                if (newell.LengthSquared < 1e-6f) continue; // no area: Unity would drop it anyway
                 if (Vector.Dot(newell, normal) < 0) poly.Reverse();
                 Add(group, mtl, poly, poly.Select(Uv).ToArray());
                 brushFaces++;
             }
 
         // Props: static props (game lump "sprp") and prop_* entities.
-        var placed = new List<(string Model, Vector Origin, Vector Angles, int Skin, float Scale, bool Physics)>();
+        // Solid: 0 none, 2 its bounding box, 6 its own collision model (.phy), as the map set it.
+        var placed = new List<(string Model, Vector Origin, Vector Angles, int Skin, float Scale, bool Physics, int Solid)>();
         var gameLump = Lump(35);
         for (int k = 0, count = gameLump.Count >= 4 ? I32(gameLump.Array!, gameLump.Offset) : 0; k < count; k++)
         {
@@ -653,7 +769,7 @@ internal static class SourceMaps
             for (int i = 0; i < props && size >= 36; i++)
             {
                 int o = p + size * i, kind = U16(a, o + 24);
-                if (kind < modelNames.Length) placed.Add((modelNames[kind], Vec(a, o), Vec(a, o + 12), I32(a, o + 32), 1, false));
+                if (kind < modelNames.Length) placed.Add((modelNames[kind], Vec(a, o), Vec(a, o + 12), I32(a, o + 32), 1, false, a[o + 30]));
             }
         }
         foreach (var e in entities)
@@ -662,11 +778,13 @@ internal static class SourceMaps
             if (!cls.StartsWith("prop_") || !model.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase)) continue;
             float.TryParse(e.GetValueOrDefault("modelscale", "1"), NumberStyles.Float, CultureInfo.InvariantCulture, out var scale);
             float.TryParse(e.GetValueOrDefault("skin", "0"), NumberStyles.Float, CultureInfo.InvariantCulture, out var skin);
-            placed.Add((model, Parse(e.GetValueOrDefault("origin", "0 0 0")), Parse(e.GetValueOrDefault("angles", "0 0 0")), (int)skin, scale > 0 ? scale : 1, cls.StartsWith("prop_physics")));
+            int solid = int.TryParse(e.GetValueOrDefault("solid", "6"), out var given) ? given : 6;
+            placed.Add((model, Parse(e.GetValueOrDefault("origin", "0 0 0")), Parse(e.GetValueOrDefault("angles", "0 0 0")), (int)skin, scale > 0 ? scale : 1, cls.StartsWith("prop_physics"), solid));
         }
         var loaded = new Dictionary<string, Model?>(StringComparer.Ordinal);
-        int propCount = 0, breakables = 0, missingModels = 0;
-        foreach (var (rawModel, origin, angles, skin, scale, physics) in placed)
+        var shapes = new Dictionary<string, List<Vector[]>?>(StringComparer.Ordinal);
+        int propCount = 0, breakables = 0, missingModels = 0, collisionModels = 0;
+        foreach (var (rawModel, origin, angles, skin, scale, physics, solid) in placed)
         {
             token.ThrowIfCancellationRequested();
             var modelName = rawModel.ToLowerInvariant().Replace('\\', '/');
@@ -687,10 +805,31 @@ internal static class SourceMaps
             if (parts.Count == 0) continue;
             var min = parts.SelectMany(t => t.Positions).Aggregate(Vector.Min); var max = parts.SelectMany(t => t.Positions).Aggregate(Vector.Max);
             // Props under about 15 m across (cars, poles, bins, signs) and the map's physics props become breakables:
-            // physics bodies a tank shoves aside, which don't block tank navigation. One object each.
-            bool breakable = physics || (max - min).Length * Scale < 15;
-            var group = breakable ? $"Sprocket Breakable {label} {propCount}" : "prop_" + label;
-            if (breakable) breakables++;
+            // physics bodies a tank shoves aside, which don't block tank navigation. One object each. A prop the map made
+            // non-solid (grass, foliage) is only drawn.
+            bool breakable = physics || solid != 0 && (max - min).Length * Scale < 15;
+            string group;
+            if (breakable) { group = $"Sprocket Breakable {label} {propCount}"; breakables++; }
+            else if (solid == 0) group = "Sprocket Visual " + label;
+            else
+            {
+                // It collides as in the game: with its collision model (a forest's trunks, not its leaves), or its box.
+                if (!shapes.TryGetValue(modelName, out var shape))
+                {
+                    try { shape = LoadCollision(content, modelName); }
+                    catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException) { shape = null; }
+                    shapes[modelName] = shape;
+                }
+                if (solid is 2 or 3 or 4 || shape == null && solid != 6) shape = Box(model.Triangles.SelectMany(t => t.Positions));
+                group = "Sprocket Visual " + label;
+                // Without a collision model a "use your collision model" prop isn't solid in the game either (gm_bor's
+                // 36 forest tiles: with their leaves as the collision, nowhere was clear for a tank).
+                if (shape != null)
+                {
+                    foreach (var tri in shape) Add("Sprocket Collision " + label, Mat(CollisionMaterial).Mtl, tri.Select(Place).ToArray(), new (float, float)[3]);
+                    collisionModels++;
+                }
+            }
             foreach (var (mtl, positions, uvs) in parts) Add(group, mtl, positions, uvs);
             propCount++;
         }
@@ -710,34 +849,45 @@ internal static class SourceMaps
             obj.Write("# " + mapName + ", converted from the Source map by Map Framework\nmtllib materials.mtl\n");
             int vertex = 1;
             var number = CultureInfo.InvariantCulture;
+            // Corners are written once per object and shared by its faces: a model's triangles share most of theirs,
+            // and writing every corner apiece made Berlin 1944's OBJ 961 MB with 10.9 million vertices.
+            var shared = new Dictionary<(float, float, float, float, float), int>();
+            var face = new List<int>();
             foreach (var (group, byMaterial) in groups.OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 token.ThrowIfCancellationRequested();
                 obj.Write("g " + group + "\n"); // Unity's OBJ importer makes one object per g (not per o), a submesh per usemtl
+                shared.Clear();
                 foreach (var (mtl, list) in byMaterial.OrderBy(m => m.Key, StringComparer.Ordinal))
                 {
                     obj.Write("usemtl " + mtl + "\n");
                     for (int i = 0; i < list.Count;)
                     {
                         int corners = (int)list[i++];
+                        face.Clear();
                         for (int k = 0; k < corners; k++, i += 5)
                         {
-                            // Source: right-handed, Z up, inches. OBJ: right-handed, Y up, metres.
-                            obj.Write("v "); obj.Write((list[i] * Scale).ToString("F5", number)); obj.Write(' ');
-                            obj.Write((list[i + 2] * Scale).ToString("F5", number)); obj.Write(' ');
-                            obj.Write((-list[i + 1] * Scale).ToString("F5", number)); obj.Write("\nvt ");
-                            obj.Write(list[i + 3].ToString("F6", number)); obj.Write(' '); obj.Write(list[i + 4].ToString("F6", number)); obj.Write('\n');
+                            var key = (list[i], list[i + 1], list[i + 2], list[i + 3], list[i + 4]);
+                            if (!shared.TryGetValue(key, out int index))
+                            {
+                                shared[key] = index = vertex++;
+                                // Source: right-handed, Z up, inches. OBJ: right-handed, Y up, metres.
+                                obj.Write("v "); obj.Write((list[i] * Scale).ToString("F5", number)); obj.Write(' ');
+                                obj.Write((list[i + 2] * Scale).ToString("F5", number)); obj.Write(' ');
+                                obj.Write((-list[i + 1] * Scale).ToString("F5", number)); obj.Write("\nvt ");
+                                obj.Write(list[i + 3].ToString("F6", number)); obj.Write(' '); obj.Write(list[i + 4].ToString("F6", number)); obj.Write('\n');
+                            }
+                            face.Add(index);
                         }
                         obj.Write('f');
-                        for (int k = 0; k < corners; k++) { obj.Write(' '); obj.Write(vertex + k); obj.Write('/'); obj.Write(vertex + k); }
+                        foreach (int index in face) { obj.Write(' '); obj.Write(index); obj.Write('/'); obj.Write(index); }
                         obj.Write('\n');
-                        vertex += corners;
                     }
                 }
             }
         }
         return $"Source map '{mapName}': {brushFaces} faces, {displacements} displacements, {propCount} props ({breakables} breakable), "
-            + $"{skyboxParts} 3D skybox parts left out, {materials.Count} materials, {missingTextures} textures missing, {missingModels} props without their model.";
+            + $"{collisionModels} with their collision models, {skyboxParts} 3D skybox parts left out, {materials.Count} materials, {missingTextures} textures missing, {missingModels} props without their model.";
     }
 
     /// A lump as stored, or unpacked when it is LZMA-compressed (later Source branches).

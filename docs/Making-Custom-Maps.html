@@ -95,7 +95,7 @@
 
     <h2 id="need">What you need</h2>
     <ul>
-      <li><strong>Sprocket</strong> with the Sprocket Mod Loader, <strong>Battle Editor</strong> and <strong>Map Framework 0.5.0 or newer</strong>. Water, destructible scenery and the map's own lighting need 0.5.0.</li>
+      <li><strong>Sprocket</strong> with the Sprocket Mod Loader, <strong>Battle Editor</strong> and <strong>Map Framework 1.0.0 or newer</strong>. Water, destructible scenery and the map's own lighting need 0.5.0.</li>
       <li><strong>A scene</strong>: an OBJ or FBX model with its textures, a Unity scene or prefab (loose, or in a <code>.unitypackage</code>), or a <a href="#gmod">Garry's Mod map</a>.</li>
       <li><strong>Unity 6000.3.21f1</strong>, the exact version Sprocket uses (the free Personal licence is fine). Map Framework runs it hidden in the background to convert your map. It looks in Unity Hub's default folder and in <code>&lt;drive&gt;:\Unity\6000.3.21f1</code>. For anywhere else, set <code>Unity editor path</code> under <code>[Import]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code>.</li>
     </ul>
@@ -114,7 +114,7 @@
     <p>Converted maps are cached. Change any source file and the map is converted again on the next start.</p>
 
     <h2 id="gmod">Garry's Mod maps</h2>
-    <p>A Garry's Mod map can go into <code>CustomMaps</code> as it is: a workshop addon (<code>.gma</code>; subscribed ones are in <code>steamapps\workshop\content\4000\&lt;item&gt;\</code>, all called <code>gmpublisher.gma</code>) or a map file (<code>.bsp</code>). Map Framework converts it and lists it under the map's own name. What comes across:</p>
+    <p>A Garry's Mod map can go into <code>CustomMaps</code> as it is: a workshop addon or a map file (<code>.bsp</code>). Map Framework converts it and lists it under the map's own name. Subscribed addons are in <code>steamapps\workshop\content\4000\&lt;item&gt;\</code>, and every one is called <code>gmpublisher.gma</code> (older items <code>&lt;number&gt;_legacy.bin</code>), so copy the whole <code>&lt;item&gt;</code> folder into <code>CustomMaps</code>; a second addon copied loose would replace the first. What comes across:</p>
     <ul>
       <li>The map's brushes, terrain (displacements) and props, with their textures from the addon, the map itself and Garry's Mod's own content. Install Garry's Mod for maps that use its or Half-Life 2's textures; Map Framework finds it in any Steam library. Without it those surfaces are plain.</li>
       <li>Water becomes the game's water. Props smaller than about 15 m across, and the map's physics props, become <a href="#special">breakables</a> that tanks shove aside.</li>
@@ -201,6 +201,8 @@
         <tr><td><code>Sprocket Game Lighting</code></td><td>Uses the game's own sun and sky instead of the map's lighting.</td></tr>
         <tr><td><code>Sprocket Water Surface</code></td><td>A flat plane at the water level becomes the game's own water, the system Sandbox's ocean uses. If water is off in the player's graphics settings, your plane is shown instead. Tanks drive on the lake bed beneath it.</td></tr>
         <tr><td><code>Sprocket Tree</code></td><td>Bends and snaps when a tank hits it, using the game's own tree destruction, tuned for its height. Works for poles, posts and lamp posts too. Trees built from the game's own foliage presets are destructible automatically.</td></tr>
+        <tr><td><code>Sprocket Visual</code></td><td>Only drawn: tanks and shells pass through it (foliage, distant scenery).</td></tr>
+        <tr><td><code>Sprocket Collision</code></td><td>Only collided with, never drawn: a simple stand-in shape for a detailed model (tree trunks under a canopy drawn as <code>Sprocket Visual</code>).</td></tr>
         <tr><td><code>Sprocket Breakable</code><br><code>Sprocket Breakable 800</code></td><td>A tank knocks it loose and shoves it: fences, crates, barrels, carts, wrecks. The number is its mass in kilograms; without one, the mass comes from its size. It stays still and costs nothing until hit. Objects over 30 m across stay fixed.</td></tr>
       </tbody>
     </table></div>
@@ -238,6 +240,6 @@
       </tbody>
     </table></div>
 
-    <footer>Map Framework is part of the Battle Editor project for Sprocket. This guide matches Map Framework 0.5.0.</footer>
+    <footer>Map Framework is part of the Battle Editor project for Sprocket. This guide matches Map Framework 1.0.0.</footer>
   </main>
 </div>
