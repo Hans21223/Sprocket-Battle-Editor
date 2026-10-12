@@ -15,6 +15,25 @@ static class MapImportTests
     internal static void Run()
     {
         Check(MapImportConversion.Template().Contains("SprocketAutoMapExport"),"converter is embedded without an accidental culture satellite");
+        Check(MapImportConversion.IconPath("\"E:\\My, Unity\\6000.3.21f1\\Editor\\Unity.exe\",0")=="E:\\My, Unity\\6000.3.21f1\\Editor\\Unity.exe"
+            && MapImportConversion.IconPath("D:\\Unity\\Editor\\Unity.exe")=="D:\\Unity\\Editor\\Unity.exe"
+            && MapImportConversion.IconPath("Unity.exe,0")==null && MapImportConversion.IconPath(null)==null,"installed-program icon entries name the editor");
+        using(var hubList=JsonDocument.Parse("{\"schema_version\":\"2\",\"data\":[{\"version\":\"6000.3.21f1\",\"location\":[\"E:\\\\Editors\\\\U6\\\\Editor\\\\Unity.exe\"]},{\"location\":\"F:\\\\Old\"}]}"))
+        {
+            var found=MapImportConversion.EditorPaths(hubList.RootElement).ToList();
+            Check(found.Contains("E:\\Editors\\U6\\Editor\\Unity.exe") && found.Contains(Path.Combine("F:\\Old","Editor","Unity.exe"))
+                && !found.Contains("6000.3.21f1"),"Unity Hub's editor lists give every editor path, and only paths");
+        }
+        var fakeUnity = Path.Combine(Path.GetTempPath(), "SprocketMapEditorTests-" + Guid.NewGuid().ToString("N"), "6000.3.21f1");
+        Directory.CreateDirectory(Path.Combine(fakeUnity, "Editor"));
+        var fakeExe = Path.Combine(fakeUnity, "Editor", "Unity.exe"); File.WriteAllBytes(fakeExe, Array.Empty<byte>()); // no version metadata
+        try
+        {
+            Check(MapImportConversion.FindEditor(" \"" + fakeExe + "\" ") == fakeExe && MapImportConversion.FindEditor(fakeUnity) == fakeExe
+                && MapImportConversion.FindEditor(Path.Combine(fakeUnity, "Editor")) == fakeExe, "a configured editor path works quoted, or as its folder");
+            Reject(() => MapImportConversion.FindEditor(Path.Combine(fakeUnity, "missing.exe")), "a configured editor that isn't there");
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(fakeUnity)!, true); }
         var root = Path.Combine(Path.GetTempPath(), "SprocketMapImportTests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try

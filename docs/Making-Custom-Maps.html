@@ -97,7 +97,7 @@
     <ul>
       <li><strong>Sprocket</strong> with the Sprocket Mod Loader, <strong>Battle Editor</strong> and <strong>Map Framework 1.0.0 or newer</strong>. Water, destructible scenery and the map's own lighting need 0.5.0.</li>
       <li><strong>A scene</strong>: an OBJ or FBX model with its textures, a Unity scene or prefab (loose, or in a <code>.unitypackage</code>), or a <a href="#gmod">Garry's Mod map</a>.</li>
-      <li><strong>Unity 6000.3.21f1</strong>, the exact version Sprocket uses (the free Personal licence is fine). Map Framework runs it hidden in the background to convert your map. It looks in Unity Hub's default folder and in <code>&lt;drive&gt;:\Unity\6000.3.21f1</code>. For anywhere else, set <code>Unity editor path</code> under <code>[Import]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code>.</li>
+      <li><strong>Unity 6000.3.21f1</strong>, the exact version Sprocket uses (the free Personal licence is fine). Map Framework runs it hidden in the background to convert your map. It finds the editor wherever Unity Hub or Unity's installer put it, through Windows' installed programs and Unity Hub's own records (only no-installer copies, such as one unzipped by hand, aren't found). For those, set <code>Unity editor path</code> under <code>[Import]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code>.</li>
     </ul>
     <p>People you give a finished map to don't need Unity. See <a href="#sharing">Sharing a map</a>.</p>
 
@@ -240,6 +240,6 @@
       </tbody>
     </table></div>
 
-    <footer>Map Framework is part of the Battle Editor project for Sprocket. This guide matches Map Framework 1.0.0.</footer>
+    <footer>Map Framework is part of the Battle Editor project for Sprocket. This guide matches Map Framework 1.0.1.</footer>
   </main>
 </div>

@@ -12,23 +12,91 @@ internal static class MapImportConversion
     { internal EditorUnavailableException(string message) : base(message) { } }
     internal static string? FindEditor(string configured)
     {
-        if (!string.IsNullOrWhiteSpace(configured))
+        // Players write the path in quotes, which BepInEx keeps as part of the value, or give the editor's folder.
+        configured = configured.Trim().Trim('"').Trim();
+        if (configured.Length > 0)
         {
-            if (!File.Exists(configured)) throw new EditorUnavailableException("The configured Unity editor was not found.");
-            return CheckEditor(configured);
+            var exe = Directory.Exists(configured)
+                ? new[] { Path.Combine(configured, "Unity.exe"), Path.Combine(configured, "Editor", "Unity.exe") }.FirstOrDefault(File.Exists)
+                : configured;
+            if (exe == null || !File.Exists(exe)) throw new EditorUnavailableException("The configured Unity editor was not found: " + configured);
+            return CheckEditor(exe);
         }
-        var options = new List<string>
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Unity", "Hub", "Editor", MapImportSource.UnityVersion, "Editor", "Unity.exe"),
-        };
-        foreach (var drive in DriveInfo.GetDrives())
-            try
+        return EditorCandidates().FirstOrDefault(IsWantedEditor) is { } found ? Path.GetFullPath(found) : null;
+    }
+
+    /// Where the editor can be. Unity Hub can install anywhere (a player's Hub put it outside both usual folders and
+    /// the import said Unity wasn't installed, 2026-10-12), but every editor install, Hub's or the standalone
+    /// installer's, adds "Unity <version>" to Windows' installed programs with Unity.exe as its icon. Then Hub's own
+    /// records: its install folder and the editors added to it by hand. Then the usual folders.
+    static IEnumerable<string> EditorCandidates()
+    {
+        var version = MapImportSource.UnityVersion;
+        if (OperatingSystem.IsWindows())
+            foreach (var root in new[] { Microsoft.Win32.Registry.LocalMachine, Microsoft.Win32.Registry.CurrentUser })
             {
-                if (drive.IsReady && drive.DriveType == DriveType.Fixed)
-                    options.Add(Path.Combine(drive.RootDirectory.FullName,"Unity",MapImportSource.UnityVersion,"Editor","Unity.exe"));
+                string? icon = null;
+                try { using var key = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Unity " + version); icon = key?.GetValue("DisplayIcon") as string; }
+                catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { }
+                if (IconPath(icon) is { } exe) yield return exe;
             }
-            catch (IOException) { } catch (UnauthorizedAccessException) { }
-        return options.FirstOrDefault(File.Exists) is { } found ? CheckEditor(found) : null;
+        var hub = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "UnityHub");
+        if (ReadJson(Path.Combine(hub, "secondaryInstallPath.json")) is { ValueKind: JsonValueKind.String } folder && folder.GetString() is { Length: > 0 } installs)
+            yield return Path.Combine(installs, version, "Editor", "Unity.exe");
+        foreach (var list in new[] { "editors-v2.json", "editors.json" })
+            if (ReadJson(Path.Combine(hub, list)) is { } located)
+                foreach (var exe in EditorPaths(located)) yield return exe;
+        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Unity", "Hub", "Editor", version, "Editor", "Unity.exe");
+        var drives = Array.Empty<DriveInfo>();
+        try { drives = DriveInfo.GetDrives(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        foreach (var drive in drives)
+        {
+            bool usable = false;
+            try { usable = drive.IsReady && drive.DriveType == DriveType.Fixed; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            if (!usable) continue;
+            yield return Path.Combine(drive.RootDirectory.FullName, "Unity", version, "Editor", "Unity.exe");
+            yield return Path.Combine(drive.RootDirectory.FullName, "Program Files", "Unity", "Hub", "Editor", version, "Editor", "Unity.exe");
+        }
+    }
+
+    /// An installed program's icon entry as a path: `"C:\…\Unity.exe",0` names the file and an icon index.
+    internal static string? IconPath(string? icon)
+    {
+        var path = icon?.Trim() ?? "";
+        int comma = path.LastIndexOf(',');
+        if (comma > path.LastIndexOf('\\')) path = path[..comma];
+        path = path.Trim().Trim('"');
+        return path.Length > 0 && Path.IsPathRooted(path) ? path : null;
+    }
+
+    /// Every editor path in a Unity Hub editor list, whatever its layout: entries name Unity.exe or its folder.
+    internal static IEnumerable<string> EditorPaths(JsonElement e) => e.ValueKind switch
+    {
+        JsonValueKind.Object => e.EnumerateObject().SelectMany(p => EditorPaths(p.Value)),
+        JsonValueKind.Array => e.EnumerateArray().SelectMany(EditorPaths),
+        JsonValueKind.String when e.GetString() is { } s && Path.IsPathRooted(s) =>
+            s.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? new[] { s } : new[] { Path.Combine(s, "Unity.exe"), Path.Combine(s, "Editor", "Unity.exe") },
+        _ => Enumerable.Empty<string>(),
+    };
+
+    static JsonElement? ReadJson(string path)
+    {
+        try { using var json = JsonDocument.Parse(File.ReadAllText(path)); return json.RootElement.Clone(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    /// The wanted version only: Hub lists every editor it knows. Without version metadata (some installs) the folder
+    /// has to name the version; the exporter checks Application.unityVersion again before loading any scenery.
+    static bool IsWantedEditor(string path)
+    {
+        try
+        {
+            if (!path.EndsWith("Unity.exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(path)) return false;
+            var version = FileVersionInfo.GetVersionInfo(path).ProductVersion ?? "";
+            return version.Length == 0 ? path.Contains(MapImportSource.UnityVersion, StringComparison.OrdinalIgnoreCase)
+                : version.Split(' ', '_')[0] == MapImportSource.UnityVersion;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
     }
     static string CheckEditor(string path)
     {
@@ -72,7 +140,8 @@ internal static class MapImportConversion
         foreach (var stale in Directory.GetDirectories(folder).Select(Path.GetFileName).Where(n => n!.StartsWith("Work-") || n.StartsWith("Attempt-")))
             await RemoveOwned(folder,Path.Combine(folder,stale!),stale!);
         // A valid cached map can load on computers which do not have Unity installed.
-        var editor = FindEditor(configuredEditor) ?? throw new EditorUnavailableException("Automatic map import needs Unity " + MapImportSource.UnityVersion + " installed. Ready-made map bundles still work.");
+        var editor = FindEditor(configuredEditor) ?? throw new EditorUnavailableException("Automatic map import needs Unity " + MapImportSource.UnityVersion
+            + ", which wasn't found. If it is installed, set Import > Unity editor path in BepInEx\\config\\local.sprocket.maps.cfg to its Editor\\Unity.exe. Ready-made map bundles still work.");
         token.ThrowIfCancellationRequested();
         var id = Guid.NewGuid().ToString("N")[..8];
         var project = Path.Combine(folder,"Work-" + id);
