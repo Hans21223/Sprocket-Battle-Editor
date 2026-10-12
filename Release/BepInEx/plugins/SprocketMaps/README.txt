@@ -1,7 +1,9 @@
-Map Framework 1.0.0 (Beta)
+Map Framework 1.0.1 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 For Sprocket 0.2.55.5 and 0.2.56 with the Sprocket Mod Loader (BepInEx 6 IL2CPP). Unity remains 6000.3.21f1.
+New in 1.0.1: Unity 6000.3.21f1 is found wherever Unity Hub or Unity's installer put it. Before, only Unity Hub's
+default folder and <drive>:\Unity were searched, so an install anywhere else read as "not installed".
 New since 0.4.1 (details in CHANGELOG.md and docs/Making-Custom-Maps.html in the repository):
 - Garry's Mod maps: put a workshop addon (.gma) or a .bsp in CustomMaps. It is converted with its props and
   textures (stock textures come from your Garry's Mod install, found through Steam) and listed under its own name.
@@ -25,8 +27,9 @@ When updating, remove any older extra copy of SprocketMaps.dll so only one copy 
 Automatic import: put OBJ/FBX models and their textures in a subfolder of CustomMaps, or put ZIP, 7z and
 .unitypackage files directly in CustomMaps. Nested ZIP/7z archives are unpacked automatically. Unity 6000.3.21f1
 must be installed and licensed; Map Framework converts a private copy in the background with no manual export.
-Keep the included SharpCompress.dll beside SprocketMaps.dll. Other Unity locations and an additional map source
-folder can be set under Import in BepInEx/config/local.sprocket.maps.cfg.
+It finds Unity wherever Unity Hub or Unity's installer put it. Keep the included SharpCompress.dll beside
+SprocketMaps.dll. A Unity copy without an installer and an additional map source folder can be set under Import in
+BepInEx/config/local.sprocket.maps.cfg.
 Reopen the map picker after the import notice finishes. Verified cached maps can load without Unity installed.
 Converted maps are cached until their source changes. Scanning and conversion run in the background.
 An explicitly selected OBJ/FBX imports that model and its texture/material sidecars, not neighboring models.

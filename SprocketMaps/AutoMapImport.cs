@@ -25,7 +25,7 @@ internal static class AutoMapImport
     {
         enabled = config.Bind("Import","Automatic import",true,"Automatically convert OBJ, FBX, Unity packages, ZIPs and 7z map sources using the matching installed Unity editor.");
         sourceFolder = config.Bind("Import","Additional source folder","","Optional map folder or source archive. CustomMaps is always scanned.");
-        unityEditor = config.Bind("Import","Unity editor path","","Optional path to Unity 6000.3.21f1 Editor/Unity.exe. Standard Unity Hub and drive/Unity locations are detected automatically.");
+        unityEditor = config.Bind("Import","Unity editor path","","Optional, usually left empty: Unity 6000.3.21f1 is found wherever Unity Hub or Unity's installer put it. For a copy without an installer, its Editor\\Unity.exe (or its folder), without quotes, e.g. D:\\Unity\\6000.3.21f1\\Editor\\Unity.exe");
         roots = new[] { Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location)!,"CustomMaps"), Path.Combine(BepInEx.Paths.PluginPath,"CustomMaps") };
         cache = Path.Combine(BepInEx.Paths.CachePath,"SprocketMaps-imports");
         template = MapImportConversion.Template();

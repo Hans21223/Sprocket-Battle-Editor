@@ -46,9 +46,9 @@ addon `.gma`, an old workshop `<number>_legacy.bin`, or a `.bsp`; stock textures
 automatically. Put a source archive
 (`.zip`, `.7z` or `.unitypackage`) directly in `CustomMaps`, or put each model and its textures in a separate
 subfolder there. Nested ZIP/7z archives are unpacked. The matching **Unity 6000.3.21f1 editor must be installed and
-licensed**; it converts a private copy in the background, so no manual Unity export is needed. Standard Unity Hub
-and drive `Unity` installations are detected. Other locations can be set in `BepInEx/config/local.sprocket.maps.cfg`
-under **Import / Unity editor path**; **Additional source folder** accepts another map folder.
+licensed**; it converts a private copy in the background, so no manual Unity export is needed. The editor is
+found wherever Unity Hub or Unity's installer put it (through Windows' installed programs and Unity Hub's records). A
+copy without an installer can be set in `BepInEx/config/local.sprocket.maps.cfg` under **Import / Unity editor path**; **Additional source folder** accepts another map folder.
 The import notice reports progress. Reopen the map picker after it finishes. Unchanged sources use their verified
 cached conversion even without Unity installed; changed sources require a restart if that map was already registered.
 Selecting a loose OBJ or FBX imports that model with its texture/material sidecars. Unity packages use the largest
@@ -278,8 +278,8 @@ partly:
   conditions from the menu, scrolling a long list of battles.
 - The turret turn times (the turret's speed unit is inferred) and the drive corrections.
 - The tanks' shapes in the editor.
-- Map Framework: Garry's Mod props colliding through their collision models (.phy), and old workshop `_legacy.bin`
-  addons (both converted and imported offline only).
+- Map Framework: Garry's Mod props colliding through their collision models (.phy) (converted and imported offline
+  only); finding Unity through Windows' installed programs on a player's PC.
 
 ## Building
 

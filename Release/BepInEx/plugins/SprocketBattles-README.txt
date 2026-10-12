@@ -1,6 +1,7 @@
-Sprocket Battle Editor 0.18.0 + Map Framework 1.0.0 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
+Sprocket Battle Editor 0.18.0 + Map Framework 1.0.1 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
+Map Framework 1.0.1: finds Unity 6000.3.21f1 wherever Unity Hub or Unity's installer put it.
 0.18.0: runs on Sprocket 0.2.55.5 and 0.2.56. Map Framework 1.0.0 imports Garry's Mod maps safely (a damaged
 collision model can't hang the import).
 0.17.32: the New battle map picker lists maps imported in the background without a restart, and tanks start on

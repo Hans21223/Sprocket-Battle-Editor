@@ -1,3 +1,15 @@
+# Map Framework 1.0.1
+
+- Automatic import finds Unity 6000.3.21f1 wherever it is installed. It looked only in Unity Hub's default folder
+  and `<drive>:\Unity`, so a player whose Unity Hub installs elsewhere was told Unity wasn't installed (2026-10-12,
+  Sprocket 0.2.55.5). It now looks first in Windows' installed programs, where every editor install, by Unity Hub
+  or Unity's own installer, is listed as "Unity <version>" with its Unity.exe; then in Unity Hub's install folder
+  and the editors added to Hub by hand (`%APPDATA%\UnityHub`); then the usual folders, now also
+  `<drive>:\Program Files\Unity\Hub\Editor`. Only an editor of the right version is taken.
+- When Unity still isn't found, the notice says how to point Map Framework at it (Import > Unity editor path).
+- That setting accepts the path in quotes and the editor's folder. BepInEx keeps quotes as part of a setting, so
+  `"D:\Unity\6000.3.21f1\Editor\Unity.exe"` named a file that doesn't exist; a wrong path is now named in the notice.
+
 # Battle Editor 0.18.0 + Map Framework 1.0.0 (Beta)
 
 Runs on Sprocket 0.2.55.5 and 0.2.56: both plugins compile against both versions' interop, so every Harmony patch
