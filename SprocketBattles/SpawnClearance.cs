@@ -28,4 +28,23 @@ internal static class SpawnClearance
     }
 
     static int Steps(double span) => span >= 32 ? 16 : Math.Max(1, (int)Math.Ceiling(span / 2));
+
+    /// The surface a tank placed at `reference` stands on: of everything below one point, the one nearest that height.
+    /// The highest one would put a tank beside a lamp post or tree, or inside a building, on top of it, to fall from
+    /// there. Nearest keeps it on the street, on a bridge deck above the terrain, or on a floor under a roof.
+    internal static float? Support(IEnumerable<(float Y, bool Terrain)> hits, float reference, bool terrainFirst)
+    {
+        float? best = null, terrain = null;
+        foreach (var (y, isTerrain) in hits)
+        {
+            if (!float.IsFinite(y)) continue;
+            if (Nearer(y, best)) best = y;
+            if (isTerrain && Nearer(y, terrain)) terrain = y;
+        }
+        return terrainFirst && terrain != null ? terrain : best;
+
+        // Equally near: the higher, so a tank never starts inside a surface.
+        bool Nearer(float y, float? current) => current is not { } c || Math.Abs(y - reference) < Math.Abs(c - reference)
+            || Math.Abs(y - reference) == Math.Abs(c - reference) && y > c;
+    }
 }

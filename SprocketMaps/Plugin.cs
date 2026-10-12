@@ -11,9 +11,10 @@ namespace SprocketMaps;
 [BepInPlugin("local.sprocket.maps", "Map Framework", Version)]
 public sealed class Plugin : BasePlugin
 {
-    const string Version = "0.4.1";
+    const string Version = "1.0.0";
 
     internal static ManualLogSource ModLog = null!;
+    internal static bool DestructibleTreesOff; // the tree effect guard could not be installed
 
     /// Lets a battle launcher reject unsupported bundle scenes before leaving the menu, without a hard dependency.
     public static string? UnsupportedMapReason(string? map) => Maps.UnavailableReason(map);
@@ -25,6 +26,7 @@ public sealed class Plugin : BasePlugin
     {
         ModLog = Log;
         AutoMapImport.Configure(Config);
+        MapLighting.Configure(Config);
         Maps.LoadCustomBundles();
         AddComponent<CustomMapRunner>();
         var harmony = new Harmony("local.sprocket.maps");
@@ -32,6 +34,8 @@ public sealed class Plugin : BasePlugin
         catch (Exception ex) { Log.LogError($"Couldn't add maps to the game's custom battle list: {ex}"); }
         try { harmony.PatchAll(typeof(Builder)); }
         catch (Exception ex) { Log.LogError($"Couldn't attach to the game's battle start, so maps without a custom battle setup won't get one: {ex}"); }
+        try { harmony.PatchAll(typeof(TreeEffectGuard)); }
+        catch (Exception ex) { Log.LogWarning($"Couldn't guard tree effects, so imported trees stay fixed: {ex.Message}"); DestructibleTreesOff = true; }
         try { harmony.PatchAll(typeof(Repair)); }
         catch (Exception ex) { Log.LogError($"Couldn't attach to the game's custom battle start, so broken setups stay broken: {ex}"); }
         try

@@ -16,7 +16,7 @@ internal static class MapImportSource
     { ".obj", ".fbx", ".mtl", ".unity", ".prefab", ".mat", ".asset", ".meta", ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".tif", ".tiff", ".psd", ".exr", ".hdr", ".dds" };
     internal static bool Archive(string path) => (Path.GetExtension(path).ToLowerInvariant() is ".zip" or ".7z" or ".unitypackage") && !Directory.Exists(path);
     internal static bool Model(string path) => (Path.GetExtension(path).ToLowerInvariant() is ".obj" or ".fbx") && !Directory.Exists(path);
-    internal static bool Supported(string path) => Archive(path) || Model(path);
+    internal static bool Supported(string path) => Archive(path) || Model(path) || SourceMaps.Is(path);
     internal static bool AllowedAsset(string path) => Assets.Contains(Path.GetExtension(path));
 
     internal static string SafeRelative(string value)
@@ -68,7 +68,7 @@ internal static class MapImportSource
     {
         token.ThrowIfCancellationRequested();
         if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0) throw new InvalidOperationException("Linked map sources are not supported.");
-        if (Archive(source)) return new[] { source };
+        if (Archive(source) || SourceMaps.Is(source)) return new[] { source };
         var folder = Directory.Exists(source) ? source : Path.GetDirectoryName(Path.GetFullPath(source))!;
         bool selectedModel = !Directory.Exists(source) && Model(source);
         if (!Directory.Exists(source) && !selectedModel) throw new InvalidOperationException("Choose an OBJ, FBX, archive or map folder.");
@@ -89,17 +89,21 @@ internal static class MapImportSource
     }
     internal static string SceneName(string source)
     {
-        var name = Directory.Exists(source) ? Path.GetFileName(Path.TrimEndingDirectorySeparator(source)) : Path.GetFileNameWithoutExtension(source);
+        var name = DisplayName(source);
         name = new string(name.Take(48).Select(c => c < 128 && char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_').ToArray());
         var id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(source).ToUpperInvariant())))[..8].ToLowerInvariant();
         return "import_" + (string.IsNullOrEmpty(name) ? "map" : name) + "_" + id;
     }
+    /// The map's name as people know it: a folder's or file's name, or the map inside a Garry's Mod addon (workshop
+    /// addons are all called gmpublisher.gma).
+    internal static string DisplayName(string source) => Directory.Exists(source) ? Path.GetFileName(Path.TrimEndingDirectorySeparator(source))
+        : SourceMaps.Is(source) ? SourceMaps.MapName(source) : Path.GetFileNameWithoutExtension(source);
     internal static string Fingerprint(string source, CancellationToken token = default)
     {
         var directory = Directory.Exists(source) ? source : Path.GetDirectoryName(Path.GetFullPath(source))!;
         var files = SourceFiles(source, token);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        hash.AppendData(Encoding.UTF8.GetBytes(Recipe + UnityVersion));
+        hash.AppendData(Encoding.UTF8.GetBytes(Recipe + UnityVersion + (SourceMaps.Is(source) ? "+source-maps-" + SourceMaps.Version : "")));
         long total = 0; int count = 0;
         var bytes = new byte[65536];
         foreach (var file in files)
@@ -142,11 +146,19 @@ internal static class MapImportSource
             }
         }
     }
-    internal static void Stage(string source, string input, CancellationToken token = default)
+    internal static void Stage(string source, string input, CancellationToken token = default, Action<string>? log = null)
     {
         var files = SourceFiles(source, token);
         if (Directory.Exists(input) && ((File.GetAttributes(input) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(input).Any()))
             throw new InvalidOperationException("The isolated map staging directory must be empty and unlinked.");
+        if (SourceMaps.Is(source))
+        {
+            // A Garry's Mod map becomes an OBJ with its textures, which Unity then converts like any other.
+            Directory.CreateDirectory(input);
+            log?.Invoke(SourceMaps.Convert(source, input, SourceMaps.GameFolders(), token));
+            if (Files(input, token).Sum(f => new FileInfo(f).Length) > MaxBytes) throw new InvalidOperationException("The converted map exceeds the import size limit.");
+            return;
+        }
         if (!Archive(source))
         {
             var sourceFolder = Directory.Exists(source) ? source : Path.GetDirectoryName(Path.GetFullPath(source))!;

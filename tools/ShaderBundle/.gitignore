@@ -1,0 +1,12 @@
+Library/
+Temp/
+Logs/
+Build/
+UserSettings/
+obj/
+*.csproj
+*.sln
+*.log
+build-result.txt
+Assets/Bundle/
+Assets/Bundle.meta

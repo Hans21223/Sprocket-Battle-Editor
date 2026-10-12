@@ -1,0 +1,2419 @@
+{
+ "source": "Sprocket 0.2.56.1 globalgamemanagers.assets (HDRP/Lit global keyword sets per pass, as compiled into the game)",
+ "passes": [
+  {
+   "name": "GBuffer",
+   "sets": [
+    {
+     "keywords": [
+      "DECALS_4RT"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DOTS_INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DOTS_INSTANCING_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "INSTANCING_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DOTS_INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "DOTS_INSTANCING_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "INSTANCING_ON",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "LOD_FADE_CROSSFADE",
+      "RENDERING_LAYERS"
+     ]
+    },
+    {
+     "keywords": [
+      "DECALS_4RT",
+      "RENDERING_LAYERS"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ShadowCaster",
+   "sets": [
+    {
+     "keywords": []
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "DepthOnly",
+   "sets": [
+    {
+     "keywords": []
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_MSAA_DEPTH",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_NORMAL_BUFFER",
+      "WRITE_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_RENDERING_LAYER"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "MotionVectors",
+   "sets": [
+    {
+     "keywords": []
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_DECAL_BUFFER_AND_RENDERING_LAYER",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_MSAA_DEPTH"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_MSAA_DEPTH",
+      "WRITE_NORMAL_BUFFER"
+     ]
+    },
+    {
+     "keywords": [
+      "WRITE_NORMAL_BUFFER"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "TransparentDepthPrepass",
+   "sets": [
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "TransparentBackface",
+   "sets": [
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Forward",
+   "sets": [
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DECAL_SURFACE_GRADIENT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "DOTS_INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "INSTANCING_ON",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DIRLIGHTMAP_COMBINED",
+      "LIGHTMAP_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "DOTS_INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "INSTANCING_ON",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "LOD_FADE_CROSSFADE",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_CLUSTERED_LIGHTLIST",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "AREA_SHADOW_MEDIUM",
+      "DECALS_4RT",
+      "DIRECTIONAL_SHADOW_HIGH",
+      "PUNCTUAL_SHADOW_HIGH",
+      "SCREEN_SPACE_SHADOWS_ON",
+      "USE_FPTL_LIGHTLIST"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "TransparentDepthPostpass",
+   "sets": [
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "DOTS_INSTANCING_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "LOD_FADE_CROSSFADE",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "INSTANCING_ON",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "LOD_FADE_CROSSFADE",
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    },
+    {
+     "keywords": [
+      "_SURFACE_TYPE_TRANSPARENT"
+     ]
+    }
+   ]
+  }
+ ]
+}

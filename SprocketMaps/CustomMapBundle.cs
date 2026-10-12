@@ -15,6 +15,19 @@ internal static class CustomMapBundle
     }
     delegate IntPtr LoadFile(ref StringSpan path, uint crc, ulong offset);
     static LoadFile? load;
+    delegate IntPtr LoadAssets(IntPtr bundle, ref StringSpan name, IntPtr type);
+    static LoadAssets? loadAssets;
+
+    /// Every asset of this type in the bundle. The interop's LoadAllAssets references a span method this runtime
+    /// lacks, so even its empty-name branch fails to compile; this calls the same native function with an empty name.
+    internal static unsafe UnityEngine.Object[] All<T>(AssetBundle bundle) where T : UnityEngine.Object
+    {
+        loadAssets ??= IL2CPP.ResolveICall<LoadAssets>("UnityEngine.AssetBundle::LoadAssetWithSubAssets_Internal_Injected");
+        var empty = new StringSpan { Begin = (char*)1, Length = 0 }; // Unity's marshalling of "" (null is 0)
+        var array = loadAssets(UnityEngine.Object.MarshalledUnityObject.MarshalNotNull(bundle), ref empty, Il2CppType.Of<T>().Pointer);
+        return array == IntPtr.Zero ? Array.Empty<UnityEngine.Object>()
+            : new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<UnityEngine.Object>(array).ToArray();
+    }
 
     internal static unsafe AssetBundle Open(string file)
     {

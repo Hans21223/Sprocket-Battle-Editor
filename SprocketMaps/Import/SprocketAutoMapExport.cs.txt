@@ -42,7 +42,32 @@ public static class SprocketAutoMapExport
         public bool succeeded;
         public string reason;
     }
-    [Serializable] sealed class MapManifest { public int schemaVersion = 1; public int spawnCount; public string displayName; }
+    [Serializable] sealed class MapManifest { public int schemaVersion = 1; public int spawnCount; public string displayName; public MapLightingInfo lighting; }
+    // The scene's own lighting settings for Map Framework: RenderSettings belong to the active scene, which a mod must
+    // not switch in the running game.
+    [Serializable] sealed class MapLightingInfo
+    {
+        public string ambientMode, fogMode;
+        public Color ambientSky, ambientEquator, ambientGround, skyTint, skyGround, fogColor;
+        public float ambientIntensity, skyExposure, fogDensity, fogEnd;
+        public bool customSky, proceduralSky, fog;
+    }
+    static MapLightingInfo Lighting;
+    static MapLightingInfo CaptureLighting()
+    {
+        var sky = RenderSettings.skybox;
+        bool procedural = sky && sky.shader && sky.shader.name == "Skybox/Procedural";
+        return new MapLightingInfo
+        {
+            ambientMode = RenderSettings.ambientMode.ToString(), ambientIntensity = RenderSettings.ambientIntensity,
+            ambientSky = RenderSettings.ambientSkyColor, ambientEquator = RenderSettings.ambientEquatorColor, ambientGround = RenderSettings.ambientGroundColor,
+            customSky = sky && sky.name != "Default-Skybox", proceduralSky = procedural,
+            skyTint = procedural ? sky.GetColor("_SkyTint") : Color.gray, skyGround = procedural ? sky.GetColor("_GroundColor") : Color.gray,
+            skyExposure = procedural ? sky.GetFloat("_Exposure") : 1,
+            fog = RenderSettings.fog, fogMode = RenderSettings.fogMode.ToString(), fogColor = RenderSettings.fogColor,
+            fogDensity = RenderSettings.fogDensity, fogEnd = RenderSettings.fogEndDistance,
+        };
+    }
     sealed class ImportBackup
     {
         public string path;
@@ -56,10 +81,14 @@ public static class SprocketAutoMapExport
         string Argument(string name) { int at = Array.IndexOf(args, name); if (at < 0 || at + 1 >= args.Length) throw new InvalidOperationException("Missing " + name); return args[at + 1]; }
         Output = Argument("-sprocketOutput");
         var mapName = Argument("-sprocketMap");
+        int scaleAt = Array.IndexOf(args, "-sprocketScale");
+        float scale = scaleAt >= 0 && scaleAt + 1 < args.Length ? float.Parse(args[scaleAt + 1], System.Globalization.CultureInfo.InvariantCulture) : 1;
+        if (!(scale >= .01f && scale <= 1000)) throw new InvalidOperationException("-sprocketScale must be between 0.01 and 1000.");
         if (Application.unityVersion != "6000.3.21f1") throw new InvalidOperationException("Map import needs Unity 6000.3.21f1 exactly.");
         BundleName = mapName + ".bundle";
         ExportScene = "Assets/MapExport/" + mapName + ".unity";
         Directory.CreateDirectory(Output);
+        LinearLightmaps();
         Status("Importing scenery and textures");
         SourceScene = PrepareSource();
         var readyPath = Path.Combine(Output, "ready.json");
@@ -98,6 +127,8 @@ public static class SprocketAutoMapExport
             source = EditorSceneManager.OpenScene(SourceScene, OpenSceneMode.Single);
             Sanitize(source);
             RemapMaterials(source);
+            if (scale != 1) ScaleScene(source, scale);
+            Lighting = CaptureLighting(); // the source scene is the active one here
             Status("Adding solid ground and collision");
             foreach (var filter in MeshFilters(source).Where(IncludeCollision))
             {
@@ -110,6 +141,9 @@ public static class SprocketAutoMapExport
                 if (IsGround(filter)) report.addedGroundColliders++;
                 else report.addedStructureColliders++;
             }
+            // A "Sprocket Collision" object is a shape to collide with, never drawn (a prop's collision model).
+            foreach (var renderer in Components<MeshRenderer>(source).Where(r => r.name.StartsWith("Sprocket Collision", StringComparison.Ordinal)).ToArray())
+                UnityEngine.Object.DestroyImmediate(renderer);
 
             foreach (var root in source.GetRootGameObjects())
                 if (root.GetComponentsInChildren<MonoBehaviour>(true).Length != 0)
@@ -119,7 +153,8 @@ public static class SprocketAutoMapExport
             if (!EditorSceneManager.SaveScene(source, ExportScene)) throw new IOException("Could not save separate export scene.");
             AssetDatabase.Refresh();
             Physics.SyncTransforms();
-            var solids = Components<Collider>(source).Where(c => c.enabled && !c.isTrigger && c.gameObject.activeInHierarchy).ToArray();
+            var solids = Components<Collider>(source).Where(c => c.enabled && !c.isTrigger && c.gameObject.activeInHierarchy && !Destructible(c.transform)
+                && !(c is MeshCollider empty && (empty.sharedMesh == null || empty.sharedMesh.vertexCount == 0))).ToArray();
             if (solids.Length == 0) throw new InvalidOperationException("The map has no solid ground or geometry.");
             var bounds = solids[0].bounds;
             foreach (var collider in solids.Skip(1)) bounds.Encapsulate(collider.bounds);
@@ -132,9 +167,16 @@ public static class SprocketAutoMapExport
             report.readableCollisionMeshes = collisionMeshes.Length;
             var sources = new List<NavMeshBuildSource>();
             UnityEditor.AI.NavMeshEditorHelpers.CollectSourcesInStage(bounds, ~0, NavMeshCollectGeometry.PhysicsColliders, 0,
-                new List<NavMeshBuildMarkup>(), source, sources);
+                Components<Transform>(source).Where(t => Marked(t.name)).Select(t => new NavMeshBuildMarkup { root = t, ignoreFromBuild = true }).ToList(),
+                source, sources);
             report.navigationSources = sources.Count;
-            if (sources.Count != solids.Length) throw new InvalidOperationException("Navigation did not collect every repaired solid collider: " + sources.Count + " / " + solids.Length);
+            if (sources.Count != solids.Length)
+            {
+                var collected = new HashSet<Component>(sources.Select(x => x.component).Where(c => c != null));
+                var missed = solids.Where(c => !collected.Contains(c)).Take(5).Select(c => c.name + " (" + c.GetType().Name
+                    + (c is MeshCollider m && m.sharedMesh ? ", " + m.sharedMesh.vertexCount + " points, " + m.sharedMesh.triangles.Length / 3 + " triangles, size " + m.sharedMesh.bounds.size : "") + ")");
+                throw new InvalidOperationException("Navigation did not collect every repaired solid collider: " + sources.Count + " / " + solids.Length + "; missed: " + string.Join(", ", missed));
+            }
             foreach (var buildSource in sources)
                 if (buildSource.sourceObject is Mesh mesh && !mesh.isReadable)
                     throw new InvalidOperationException("Runtime navigation would omit unreadable mesh: " + mesh.name);
@@ -153,6 +195,11 @@ public static class SprocketAutoMapExport
             if (report.navigationTriangles == 0) throw new InvalidOperationException("Tank navigation bake is empty.");
             File.WriteAllText(Path.Combine(Output, "custom-map-navigation.json"), JsonUtility.ToJson(new NavigationSnapshot { vertices = triangles.vertices, indices = triangles.indices }));
             Status("Checking tank navigation and safe starting positions");
+            // Breakables and trees give way under tanks, so a tank may start on a bike or a sign (it's shoved aside): a
+            // narrow street lined with them had no clear 8 m square. Their colliders are back on in the saved scene.
+            var shoved = Components<Collider>(source).Where(c => c.enabled && Destructible(c.transform)).ToArray();
+            void Shoved(bool solid) { foreach (var collider in shoved) collider.enabled = solid; Physics.SyncTransforms(); }
+            Shoved(false);
             bool pairFound = false;
             foreach (var count in new[] { 16, 8, 4, 2, 1 })
             {
@@ -187,7 +234,9 @@ public static class SprocketAutoMapExport
             if (!pairFound) throw new InvalidOperationException("No safe connected tank formation pair exists at capacities 16, 8, 4, 2 or 1.");
             Marker(source, "Sprocket Spawn Area A", report.markerA);
             Marker(source, "Sprocket Spawn Area B", report.markerB);
+            Shoved(true);
             if (!EditorSceneManager.SaveScene(source, ExportScene)) throw new IOException("Could not save validated spawn markers.");
+            Shoved(false);
             ValidateTeam(source, bounds, report, "A", report.markerA, report.markerB);
             ValidateTeam(source, bounds, report, "B", report.markerB, report.markerA);
             var pathToOtherTeam = new NavMeshPath();
@@ -196,6 +245,7 @@ public static class SprocketAutoMapExport
             report.navigationCorners = pathToOtherTeam.corners.Length;
             if (!report.pathComplete) report.failures.Add("No complete native tank navigation path connects marker A and marker B.");
             if (report.failures.Count != 0) throw new InvalidOperationException(string.Join("\n", report.failures));
+            Shoved(true);
             Debug.Log("SPROCKET_MAP_VALIDATION_PASS: capacity=" + report.spawnCount + ", positions=" + report.spawnCount * 2
                 + ", footprint corners=" + report.spawnCount * 8 + ", tank clearance and complete navigation path.");
             Status("Saving the imported map");
@@ -252,7 +302,7 @@ public static class SprocketAutoMapExport
             {
                 File.WriteAllText(readyPath, JsonUtility.ToJson(report, true));
                 File.WriteAllText(Path.ChangeExtension(report.bundlePath, ".json"),
-                    JsonUtility.ToJson(new MapManifest { spawnCount = report.spawnCount, displayName = Array.IndexOf(args,"-sprocketDisplayName") >= 0 ? Argument("-sprocketDisplayName") : mapName }, true));
+                    JsonUtility.ToJson(new MapManifest { spawnCount = report.spawnCount, lighting = Lighting, displayName = Array.IndexOf(args,"-sprocketDisplayName") >= 0 ? Argument("-sprocketDisplayName") : mapName }, true));
                 Debug.Log("SPROCKET_CUSTOM_MAP_READY: " + report.bundlePath + " SHA256=" + report.bundleSha256);
             }
         }
@@ -269,10 +319,11 @@ public static class SprocketAutoMapExport
         }
         var trial = new Report { spawnCount = count };
         ValidateTeam(scene, bounds, trial, "A", a, b);
-        if (trial.failures.Count != 0) return false;
-        ValidateTeam(scene, bounds, trial, "B", b, a);
+        if (trial.failures.Count == 0) ValidateTeam(scene, bounds, trial, "B", b, a);
+        if (trial.failures.Count != 0 && ++rejectionsLogged <= 5) Debug.Log("SPROCKET_MAP_SPAWN_REJECTED: " + trial.failures[0]);
         return trial.failures.Count == 0;
     }
+    static int rejectionsLogged;
     static Tuple<Vector3, Vector3> FindPair(Scene scene, Bounds bounds, Report report)
     {
         var candidates = new List<Vector3>();
@@ -295,11 +346,13 @@ public static class SprocketAutoMapExport
         report.searchCandidates = candidates.Count;
         Debug.Log("SPROCKET_MAP_SPAWN_SEARCH: capacity=" + report.spawnCount + ", candidate " + halfSize * 2 + "m squares=" + candidates.Count);
         var pairs = new List<(int A, int B, float Distance)>();
+        // Teams start 100 m apart, or half the map's width on a smaller map (a 150 m town block can't hold 100 m).
+        float apart = Mathf.Min(100, .5f * Mathf.Max(bounds.size.x, bounds.size.z));
         for (int i = 0; i < candidates.Count; i++)
             for (int j = i + 1; j < candidates.Count; j++)
             {
                 var distance = (candidates[i] - candidates[j]).sqrMagnitude;
-                if (distance >= 100 * 100) pairs.Add((i, j, distance));
+                if (distance >= apart * apart) pairs.Add((i, j, distance));
             }
         pairs.Sort((a,b) => b.Distance.CompareTo(a.Distance));
         foreach (var pair in pairs)
@@ -319,7 +372,15 @@ public static class SprocketAutoMapExport
     static IEnumerable<T> Components<T>(Scene scene) where T : Component => scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<T>(true));
     static IEnumerable<MeshFilter> MeshFilters(Scene scene) => Components<MeshFilter>(scene).Where(f => f.sharedMesh != null && f.gameObject.activeInHierarchy);
     static bool IsGround(MeshFilter filter) => filter.name == "city_part_demo_main1" || filter.name == "city_part_demo_main2";
-    static bool IncludeCollision(MeshFilter filter) => filter.sharedMesh != null;
+    // A "Sprocket Water Surface" plane becomes the game's water: tanks drive on the bed beneath it, and spawns never land on it.
+    // Breakables and trees give way under tanks in the game (Destructibles), so they don't block tank navigation.
+    static bool Marked(string name) => name.StartsWith("Sprocket Breakable", StringComparison.Ordinal) || name.StartsWith("Sprocket Tree", StringComparison.Ordinal);
+    static bool Destructible(Transform t) { for (; t != null; t = t.parent) if (Marked(t.name)) return true; return false; }
+    // An empty mesh (Unity drops zero-area faces, so a group of only those comes out empty) collides with nothing and
+    // navigation skips it: no collider for it (Berlin 1944: "1308 / 1309").
+    // "Sprocket Visual" objects are only drawn (their collision is a "Sprocket Collision" object, or none).
+    static bool IncludeCollision(MeshFilter filter) => filter.sharedMesh != null && filter.sharedMesh.vertexCount > 0
+        && !filter.name.StartsWith("Sprocket Water Surface", StringComparison.Ordinal) && !filter.name.StartsWith("Sprocket Visual", StringComparison.Ordinal);
     static void Marker(Scene scene, string name, Vector3 at)
     {
         var existing = Components<Transform>(scene).FirstOrDefault(t => t.name == name);
@@ -355,18 +416,19 @@ public static class SprocketAutoMapExport
                 if (Mathf.Abs(nav.position.x - check.ground.x) > .05f || Mathf.Abs(nav.position.z - check.ground.z) > .05f)
                     throw new InvalidOperationException("outside navigation polygon footprint");
                 if (Mathf.Abs(nav.position.y - check.ground.y) > 1 || Mathf.Abs(check.ground.y - center.y) > 1) throw new InvalidOperationException("uneven ground");
-                var overlaps = Physics.OverlapBox(check.ground + Vector3.up * 3, new Vector3(4, 2.4f, 4), facing, ~0, QueryTriggerInteraction.Ignore);
+                // A tank's room: 4 m wide and 9 m long along its facing (an 8 m square turned toward the other team
+                // caught the walls of any street it didn't line up with).
+                var overlaps = Physics.OverlapBox(check.ground + Vector3.up * 3, new Vector3(2, 2.4f, 4.5f), facing, ~0, QueryTriggerInteraction.Ignore);
                 check.clear = overlaps.Length == 0;
                 if (!check.clear) throw new InvalidOperationException("tank volume intersects " + string.Join(", ", overlaps.Select(c => c.name).Distinct()));
                 for (int x = -1; x <= 1; x += 2)
                     for (int z = -1; z <= 1; z += 2)
                     {
-                        var corner = place + side * (x * 4) + back * (z * 4);
+                        // Level ground under each corner of the tank. Not tank navigation: it keeps a tank's radius
+                        // from walls, so in a street the corners of a tank that fits fall outside it.
+                        var corner = place + side * (x * 2) + back * (z * 4.5f);
                         var support = Ground(scene, bounds, corner.x, corner.z);
-                        if (Mathf.Abs(support.y - check.ground.y) > .5f || !NavMesh.SamplePosition(support, out var footprintNav, .75f, NavMesh.AllAreas)
-                            || Mathf.Abs(footprintNav.position.y - support.y) > 1
-                            || Mathf.Abs(footprintNav.position.x - support.x) > .05f || Mathf.Abs(footprintNav.position.z - support.z) > .05f)
-                            throw new InvalidOperationException("unsupported footprint corner");
+                        if (Mathf.Abs(support.y - check.ground.y) > .5f) throw new InvalidOperationException("unsupported footprint corner");
                     }
                 check.footprintSupported = true;
             }
@@ -409,9 +471,37 @@ public static class SprocketAutoMapExport
         if (!EditorSceneManager.SaveScene(working,path)) throw new IOException("Could not prepare the imported scene.");
         return path;
     }
+    /// Scales the whole map about the origin, for scenery modelled smaller or larger than life (-sprocketScale).
+    static void ScaleScene(Scene scene, float k)
+    {
+        foreach (var root in scene.GetRootGameObjects()) { root.transform.localPosition *= k; root.transform.localScale *= k; }
+        foreach (var light in Components<Light>(scene)) light.range *= k;
+        foreach (var probe in Components<ReflectionProbe>(scene)) { probe.size *= k; probe.center *= k; }
+        foreach (var data in Components<Terrain>(scene).Select(t => t.terrainData).Where(d => d).Distinct()) data.size *= k;
+        Debug.Log("SPROCKET_MAP_SCALE: " + k);
+    }
+    // Names Map Framework reads. Unity's OBJ importer turns spaces in group names into underscores
+    // ("Sprocket_Water_Surface"), so those are named back.
+    static readonly string[] MarkerNames = { "Sprocket Water Surface", "Sprocket Breakable", "Sprocket Tree", "Sprocket Spawn Area A", "Sprocket Spawn Area B", "Sprocket Game Lighting", "Sprocket Visual", "Sprocket Collision" };
     static void Sanitize(Scene scene)
     {
+        foreach (var transform in Components<Transform>(scene))
+            foreach (var marker in MarkerNames)
+            {
+                var underscored = marker.Replace(' ', '_');
+                if (transform.name.StartsWith(underscored, StringComparison.Ordinal)) { transform.name = marker + transform.name.Substring(underscored.Length).Replace('_', ' '); break; }
+            }
+        // Character and wheel colliders move characters and cars; they aren't scenery and navigation can't use them.
+        foreach (var controller in Components<CharacterController>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(controller);
+        foreach (var wheel in Components<WheelCollider>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(wheel);
         foreach (var body in Components<Rigidbody>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(body);
+        // Physics ignores a collider scaled 0 on any axis; a flat mesh (a quad) scaled 0 across itself looks the same at 1.
+        foreach (var filter in Components<MeshFilter>(scene).Where(f => f.sharedMesh))
+        {
+            var scale = filter.transform.localScale; var extents = filter.sharedMesh.bounds.extents;
+            for (int axis = 0; axis < 3; axis++) if (scale[axis] == 0 && extents[axis] < 1e-4f) scale[axis] = 1;
+            filter.transform.localScale = scale;
+        }
         foreach (var transform in Components<Transform>(scene).ToArray()) GameObjectUtility.RemoveMonoBehavioursWithMissingScript(transform.gameObject);
         foreach (var script in Components<MonoBehaviour>(scene).ToArray()) if (script != null) UnityEngine.Object.DestroyImmediate(script);
         foreach (var camera in Components<Camera>(scene).ToArray()) UnityEngine.Object.DestroyImmediate(camera);
@@ -423,6 +513,7 @@ public static class SprocketAutoMapExport
     sealed class Mtl
     {
         public string Name,Texture;
+        public bool Cutout; // an alpha map (map_d): the texture's alpha cuts the surface out
         public Color Color=Color.white;
         public Vector2 Scale=Vector2.one,Offset=Vector2.zero;
     }
@@ -496,9 +587,45 @@ public static class SprocketAutoMapExport
                     var color=current.Color;color.a=Mathf.Clamp01(tokens[0]=="Tr"?1-alpha:alpha);current.Color=color;
                 }
                 else if(current!=null && tokens[0]=="map_Kd") MtlTexture(current,tokens,folder,boundary);
+                else if(current!=null && tokens[0]=="map_d") current.Cutout=true;
             }
         }
         return result;
+    }
+    // The game renders in linear colour and reads lightmaps as full HDR. This throwaway project starts in Unity's gamma
+    // default, which stores baked light gamma-encoded: read as linear, dark areas came out up to 7x too bright and lamp
+    // pools flattened (Demo City, 2026-10-11). Lightmaps are imported again under the game's settings.
+    static void LinearLightmaps()
+    {
+        PlayerSettings.colorSpace=ColorSpace.Linear;
+        var settings=new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset")[0]);
+        var list=settings.FindProperty("m_BuildTargetGroupLightmapEncodingQuality");
+        int at=-1;
+        for(int i=0;i<list.arraySize;i++) if(list.GetArrayElementAtIndex(i).FindPropertyRelative("m_BuildTarget").stringValue=="Standalone") at=i;
+        if(at<0) { at=list.arraySize; list.InsertArrayElementAtIndex(at); }
+        var entry=list.GetArrayElementAtIndex(at);
+        entry.FindPropertyRelative("m_BuildTarget").stringValue="Standalone";
+        entry.FindPropertyRelative("m_EncodingQuality").intValue=2; // High: full HDR, as the game's own lightmaps
+        settings.ApplyModifiedPropertiesWithoutUndo();
+        foreach(var guid in AssetDatabase.FindAssets("t:Texture2D",new[]{"Assets"}))
+        {
+            var path=AssetDatabase.GUIDToAssetPath(guid);
+            if(AssetImporter.GetAtPath(path) is TextureImporter importer && importer.textureType==TextureImporterType.Lightmap)
+                AssetDatabase.ImportAsset(path,ImportAssetOptions.ForceUpdate);
+        }
+    }
+    // A material's enabled keywords, as saved: current (valid and invalid lists) and older (one string) formats.
+    static HashSet<string> Keywords(SerializedObject material)
+    {
+        var keywords=new HashSet<string>(StringComparer.Ordinal);
+        foreach(var name in new[]{"m_ValidKeywords","m_InvalidKeywords"})
+        {
+            var list=material.FindProperty(name); if(list==null||!list.isArray) continue;
+            for(int i=0;i<list.arraySize;i++) keywords.Add(list.GetArrayElementAtIndex(i).stringValue);
+        }
+        var legacy=material.FindProperty("m_ShaderKeywords");
+        if(legacy!=null&&legacy.propertyType==SerializedPropertyType.String) foreach(var k in legacy.stringValue.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries)) keywords.Add(k);
+        return keywords;
     }
     static void RemapMaterials(Scene scene)
     {
@@ -512,9 +639,13 @@ public static class SprocketAutoMapExport
             for(int i=0;i<slots.Length;i++)
             {
                 var old=slots[i]; if(!old) continue;
+                if(old.GetTag("SprocketMapNativePreset",false,"")=="1"
+                    && new[]{"NatureManufacture/HDRP/Foliage/Foliage","NatureManufacture/HDRP/Foliage/Bark","NatureManufacture/HDRP/Foliage/Cross"}
+                        .Contains(old.GetTag("SprocketMapNativeShader",false,""))) continue;
                 if(!replacements.TryGetValue(old,out var material))
                 {
-                    material=new Material(standard){name=old.name};
+                    material=new Material(standard){name=old.name,enableInstancing=old.enableInstancing};
+                    material.SetOverrideTag("SprocketMapInterchange","standard-v1");
                     var serialized=new SerializedObject(old); var saved=serialized.FindProperty("m_SavedProperties");
                     SerializedProperty TextureEntry(string key)
                     {
@@ -562,9 +693,34 @@ public static class SprocketAutoMapExport
                     var normal=Texture("_NormalMap")??Texture("_BumpMap");
                     if(normal) {material.SetTexture("_BumpMap",normal);material.SetFloat("_BumpScale",FloatValue("_NormalScale",FloatValue("_BumpScale",1)));material.EnableKeyword("_NORMALMAP");}
                     if(normal) TextureTransform(Texture("_NormalMap")?"_NormalMap":"_BumpMap","_BumpMap");
-                    bool transparent=FloatValue("_Surface",0)>0.5f || FloatValue("_SurfaceType",0)>0.5f || FloatValue("_Mode",0)>=2 || color.a<.999f;
-                    bool clipped=FloatValue("_AlphaClip",0)>0.5f || FloatValue("_AlphaCutoffEnable",0)>0.5f || old.IsKeywordEnabled("_ALPHATEST_ON");
-                    if(clipped) {material.SetFloat("_Mode",1);material.EnableKeyword("_ALPHATEST_ON");material.SetFloat("_Cutoff",FloatValue("_AlphaCutoff",FloatValue("_Cutoff",.5f)));material.renderQueue=2450;}
+                    var mask=Texture("_MaskMap")??Texture("_MetallicGlossMap");
+                    if(mask)
+                    {
+                        material.SetTexture("_MetallicGlossMap",mask);material.EnableKeyword("_METALLICGLOSSMAP");
+                        material.SetFloat("_GlossMapScale",FloatValue("_GlossMapScale",1));
+                        TextureTransform(Texture("_MaskMap")?"_MaskMap":"_MetallicGlossMap","_MetallicGlossMap");
+                        if(Texture("_MaskMap") || old.GetTag("SprocketMapMaskMap",false,"")=="1")
+                        {material.SetOverrideTag("SprocketMapMaskMap","1");material.SetTexture("_OcclusionMap",mask);}
+                    }
+                    // Legacy cutout shaders clip without a keyword; a map's own shader isn't copied (code), so a material
+                    // that lost it but saved a cutoff value was a cutout too.
+                    string shaderName=old.shader?old.shader.name:"";
+                    bool lostShader=shaderName is "" or "Hidden/InternalErrorShader";
+                    bool clipped=FloatValue("_AlphaClip",0)>0.5f || FloatValue("_AlphaCutoffEnable",0)>0.5f || FloatValue("_Mode",0)==1 || old.IsKeywordEnabled("_ALPHATEST_ON") || old.GetTag("SprocketMapAlphaClip",false,"")=="1" || authored?.Cutout==true
+                        || shaderName.Contains("Cutout") || lostShader && (FloatValue("_Cutoff",-1)>=0 || FloatValue("_ClipValue",-1)>=0);
+                    bool transparent=FloatValue("_Surface",0)>0.5f || FloatValue("_SurfaceType",0)>0.5f || FloatValue("_Mode",0)>=2 || (!clipped && color.a<.999f) || old.GetTag("SprocketMapTransparent",false,"")=="1"
+                        || !clipped && shaderName.StartsWith("Legacy Shaders/Transparent/");
+                    if(transparent) material.SetOverrideTag("SprocketMapTransparent","1");
+                    if(clipped)
+                    {
+                        float cutoff=FloatValue("_AlphaCutoff",FloatValue("_Cutoff",.5f));
+                        if(float.TryParse(old.GetTag("SprocketMapAlphaCutoff",false,""),System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out var taggedCutoff)) cutoff=taggedCutoff;
+                        if(float.IsNaN(cutoff)||float.IsInfinity(cutoff)) throw new InvalidOperationException("Invalid alpha cutoff in map material: "+old.name);
+                        cutoff=Mathf.Clamp01(cutoff);
+                        material.SetFloat("_Mode",1);material.EnableKeyword("_ALPHATEST_ON");material.SetFloat("_Cutoff",cutoff);material.renderQueue=2450;
+                        material.SetOverrideTag("SprocketMapAlphaClip","1");
+                        material.SetOverrideTag("SprocketMapAlphaCutoff",cutoff.ToString("R",System.Globalization.CultureInfo.InvariantCulture));
+                    }
                     else if(transparent)
                     {
                         material.SetFloat("_Mode",3);material.EnableKeyword("_ALPHAPREMULTIPLY_ON");material.renderQueue=3000;
@@ -572,10 +728,38 @@ public static class SprocketAutoMapExport
                         material.SetInt("_DstBlend",(int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
                         material.SetInt("_ZWrite",0);
                     }
-                    material.SetColor("_EmissionColor",ColorValue("_EmissionColor",ColorValue("_EmissiveColor",Color.black)));
-                    var emission=Texture("_EmissionMap")??Texture("_EmissiveColorMap");
+                    if(FloatValue("_Cull",2)==0 || FloatValue("_DoubleSidedEnable",0)>.5f || old.GetTag("SprocketMapDoubleSided",false,"")=="1")
+                        material.SetOverrideTag("SprocketMapDoubleSided","1");
+                    // Standard and URP materials glow only with emission switched on, whatever colour they keep. Their
+                    // inspectors store the switch as "emissive is black" off and derive _EMISSION from it, and the keyword
+                    // is often not saved, so either counts. HDRP materials always use their emissive colour.
+                    var giFlags=serialized.FindProperty("m_LightmapFlags");
+                    bool emissive=Keywords(serialized).Contains("_EMISSION")
+                        || giFlags!=null&&(giFlags.intValue&(int)MaterialGlobalIlluminationFlags.EmissiveIsBlack)==0
+                        || ColorValue("_EmissiveColor",Color.black).maxColorComponent>0;
+                    material.SetColor("_EmissionColor",emissive?ColorValue("_EmissionColor",ColorValue("_EmissiveColor",Color.black)):Color.black);
+                    var emission=emissive?Texture("_EmissionMap")??Texture("_EmissiveColorMap"):null;
                     if(emission) { material.SetTexture("_EmissionMap",emission);TextureTransform(Texture("_EmissionMap")?"_EmissionMap":"_EmissiveColorMap","_EmissionMap"); }
                     if(emission || material.GetColor("_EmissionColor").maxColorComponent>0) material.EnableKeyword("_EMISSION");
+                    // Texture getters retain saved bindings under missing shaders; scalar/color getters do not.
+                    void ScalarTag(string tag,string property)
+                    {
+                        float value=material.GetFloat(property);
+                        if(float.IsNaN(value)||float.IsInfinity(value)) throw new InvalidOperationException("Invalid map material value: "+old.name+"/"+property);
+                        material.SetOverrideTag(tag,value.ToString("R",System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    void ColorTag(string tag,string property)
+                    {
+                        var value=material.GetColor(property); var channels=new[]{value.r,value.g,value.b,value.a};
+                        if(channels.Any(channel=>float.IsNaN(channel)||float.IsInfinity(channel))) throw new InvalidOperationException("Invalid map material colour: "+old.name+"/"+property);
+                        material.SetOverrideTag(tag,string.Join(",",channels.Select(channel=>channel.ToString("R",System.Globalization.CultureInfo.InvariantCulture))));
+                    }
+                    ColorTag("SprocketMapBaseColor","_Color");
+                    ColorTag("SprocketMapEmissionColor","_EmissionColor");
+                    ScalarTag("SprocketMapNormalScale","_BumpScale");
+                    ScalarTag("SprocketMapSmoothnessScale","_GlossMapScale");
+                    ScalarTag("SprocketMapMetallic","_Metallic");
+                    ScalarTag("SprocketMapSmoothness","_Glossiness");
                     string path="Assets/MapExport/Materials/"+replacements.Count.ToString("D4")+".mat";
                     if(AssetDatabase.LoadAssetAtPath<Material>(path)) AssetDatabase.DeleteAsset(path);
                     AssetDatabase.CreateAsset(material,path); replacements.Add(old,material);

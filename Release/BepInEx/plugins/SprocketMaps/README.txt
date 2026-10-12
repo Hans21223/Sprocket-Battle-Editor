@@ -1,9 +1,16 @@
-Map Framework 0.4.1 (Alpha)
+Map Framework 1.0.0 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
-For Sprocket 0.2.56.0 with the Sprocket Mod Loader (BepInEx 6 IL2CPP).
-Rebuilt against fresh game interop; offline regression, patch-target and native scene-loader ABI checks pass.
-In-game testing remains pending. Unity remains 6000.3.21f1.
+For Sprocket 0.2.55.5 and 0.2.56 with the Sprocket Mod Loader (BepInEx 6 IL2CPP). Unity remains 6000.3.21f1.
+New since 0.4.1 (details in CHANGELOG.md and docs/Making-Custom-Maps.html in the repository):
+- Garry's Mod maps: put a workshop addon (.gma) or a .bsp in CustomMaps. It is converted with its props and
+  textures (stock textures come from your Garry's Mod install, found through Steam) and listed under its own name.
+  An old workshop item (<number>_legacy.bin) or a whole workshop item folder works too. Props collide as in Garry's
+  Mod: with their collision model, their box, or not at all.
+- Maps keep their own lighting: baked lightmaps, glowing materials, sky, fog and lamps (lamp distance and brightness
+  under Lighting in local.sprocket.maps.cfg).
+- Water surfaces, breakable scenery and trees, and Map Framework's own map shaders (sprocketmaps.shaders).
+- Import fixes for older Unity assets, miniature models and town maps with narrow streets.
 
 Included maps: Ambush (repaired team setup), The Crossroad, Silent Border, Sandbox and Sandbox (Low performance).
 The maps appear in the game's Custom Battle list and in Battle Editor's map picker. No scenario files are replaced.
@@ -11,7 +18,8 @@ Third-party Demo City and FNAF scenery used in local tests is excluded from publ
 licensed sources or add compatible scene bundles to CustomMaps. Existing local maps remain usable.
 See Map-Asset-Provenance.txt for local fixture origins and distribution scope.
 
-Keep SprocketMaps.dll, Sandbox.png and Sandbox (Low performance).png together in BepInEx\plugins\SprocketMaps.
+Keep SprocketMaps.dll, sprocketmaps.shaders, Sandbox.png and Sandbox (Low performance).png together in
+BepInEx\plugins\SprocketMaps.
 When updating, remove any older extra copy of SprocketMaps.dll so only one copy is installed.
 
 Automatic import: put OBJ/FBX models and their textures in a subfolder of CustomMaps, or put ZIP, 7z and
@@ -24,8 +32,8 @@ Converted maps are cached until their source changes. Scanning and conversion ru
 An explicitly selected OBJ/FBX imports that model and its texture/material sidecars, not neighboring models.
 Restart to use changes to an already registered map. A package uses its largest scene, or largest model/prefab.
 Conventional textures/colours and authored transforms are retained. Scripts and custom shader behaviour are not
-imported. Maps need solid navigable ground at least 100 metres across both axes with two clear areas 100 metres
-apart. Failed imports report their diagnostic log and do not modify native maps or the supplied source files.
+imported. Maps need solid navigable ground at least 100 metres across both axes with two clear, connected areas
+100 metres apart (half the map's width on a smaller map). Failed imports report their diagnostic log and do not modify native maps or the supplied source files.
 
 Custom scenery bundles go in BepInEx\plugins\SprocketMaps\CustomMaps. They must be Windows scene bundles built
 with Unity 6000.3.21f1, with solid ground and readable collision meshes for tank navigation. The game supplies its

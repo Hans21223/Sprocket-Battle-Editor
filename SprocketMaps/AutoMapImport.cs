@@ -63,7 +63,7 @@ internal static class AutoMapImport
             status = "Preparing map import";
             Plugin.ModLog.LogInfo("Automatic map import starting: " + next.Source);
             running = Task.Run(() => MapImportConversion.Convert(next.Source,cache,editorPath,template,
-                value => { if (!importToken.IsCancellationRequested) status = value; },importToken),importToken);
+                value => { if (!importToken.IsCancellationRequested) status = value; },importToken,Plugin.ModLog.LogInfo),importToken);
         }
         catch (Exception ex)
         {
@@ -113,7 +113,8 @@ internal static class AutoMapImport
             else
             {
                 CustomMapBridge.Register(result.Bundle);
-                Notice("Map imported: " + Path.GetFileNameWithoutExtension(result.Source) + ". Open the map picker to choose it.");
+                var bundle = result.Bundle; _ = Task.Run(() => MapImportConversion.RemoveOlder(bundle)); // gigabytes: off the game's thread
+                Notice("Map imported: " + MapImportSource.DisplayName(result.Source) + ". Open the map picker to choose it.");
                 Plugin.ModLog.LogInfo($"Automatic map import ready: source='{result.Source}', bundle='{result.Bundle}', capacity={result.Capacity} per side");
             }
             registered[result.Source] = result.Fingerprint;
@@ -139,6 +140,8 @@ internal static class AutoMapImport
     {
         var current = status;
         if ((running == null && Time.realtimeSinceStartup > noticeUntil) || string.IsNullOrEmpty(current)) return;
+        // Progress stays in the menus; it sat over whole battles while a slow import ran. Short notices show anywhere.
+        if (Time.realtimeSinceStartup > noticeUntil && !UnityEngine.SceneManagement.SceneManager.GetSceneByName("MainMenu").isLoaded) return;
         var source = running == null ? "" : active?.Source ?? "";
         if (drawnStatus != current || drawnSource != source)
         {

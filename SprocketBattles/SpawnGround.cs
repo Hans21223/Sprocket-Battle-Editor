@@ -9,22 +9,20 @@ internal static class SpawnGround
     internal static float? Height(float x, float z, float referenceY, bool terrainFirst = false)
     {
         if (!float.IsFinite(x) || !float.IsFinite(z) || !float.IsFinite(referenceY)) return null;
-        float? terrain = null, surface = null;
+        var hits = new List<(float Y, bool Terrain)>();
         foreach (var hit in Physics.RaycastAll(new Vector3(x, referenceY + 1000, z), Vector3.down, 5000, ~0, QueryTriggerInteraction.Ignore))
         {
             var collider = hit.collider;
             if (collider == null || !float.IsFinite(hit.point.y)) continue;
-            if (collider.TryCast<TerrainCollider>() != null)
-                terrain = terrain is { } old ? Math.Max(old, hit.point.y) : hit.point.y;
+            if (collider.TryCast<TerrainCollider>() != null) hits.Add((hit.point.y, true));
             else if (collider.attachedRigidbody == null && collider.GetComponentInParent<VehicleObject>() == null
                      && collider.GetComponentInParent<VehicleBehaviour>() == null
                      && !collider.transform.root.name.StartsWith("Battle Editor", StringComparison.Ordinal)
                      && hit.point.y <= referenceY + 60)
-                // Keep authored bridge/road placement, without selecting a distant overhead scene collider.
-                surface = surface is { } old ? Math.Max(old, hit.point.y) : hit.point.y;
+                // Not a distant overhead scene collider.
+                hits.Add((hit.point.y, false));
         }
-        if (terrainFirst && terrain != null) return terrain;
-        return terrain is { } floor && surface is { } solid ? Math.Max(floor, solid) : terrain ?? surface;
+        return SpawnClearance.Support(hits, referenceY, terrainFirst);
     }
 
     internal static Vector3? Position(SpawnAssembly assembly, Vector3 target, Quaternion turn, bool terrainFirst = false)
