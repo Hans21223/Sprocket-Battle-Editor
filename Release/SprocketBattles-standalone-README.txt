@@ -1,4 +1,4 @@
-Sprocket Battle Editor 0.18.0 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
+Sprocket Battle Editor 0.18.1 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 INSTALL

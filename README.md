@@ -11,8 +11,8 @@ For **Sprocket 0.2.55.5 and 0.2.56** with the [Sprocket Mod Loader](https://gith
 Both plugins compile against both game versions' interop, so every Harmony patch target and game member they use
 exists in each, and the offline regression suites pass.
 
-**0.18.0 includes Battle Editor 0.18.0 and Map Framework 1.0.0.** Map Framework 1.0 imports Garry's Mod maps
-(`.gma`, `.bsp`) and keeps a map's own lighting, water and breakable scenery. Map Framework makes Ambush,
+**0.18.1 includes Battle Editor 0.18.1 and Map Framework 1.1.0.** Map Framework 1.1 builds OBJ and Garry's Mod maps
+without Unity, gives Garry's Mod maps (`.gma`, `.bsp`) their own sun, sky, fog and lamps, and keeps a map's own lighting, water and breakable scenery. Map Framework makes Ambush,
 The Crossroad, Silent Border, Sandbox and Sandbox (Low performance) available to Custom Battle and Battle Editor.
 It repairs Ambush's team setup and builds the missing custom-battle setups on the other maps. The Sandbox thumbnails
 are included beside the Map Framework DLL.
@@ -27,8 +27,8 @@ Editor Save and Play use the tank positions you place. Random spawn settings bel
 With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../../releases). By hand: copy the ZIP's
 `BepInEx` folder into the Sprocket folder.
 
-Choose **Sprocket-Battle-Editor-and-Map-Framework-0.18.0.zip** for both plugins. Separate
-**Sprocket-Battle-Editor-0.18.0.zip** and **Sprocket-Map-Framework-1.0.0.zip** downloads are also available; the loader is installed
+Choose **Sprocket-Battle-Editor-and-Map-Framework-0.18.1.zip** for both plugins. Separate
+**Sprocket-Battle-Editor-0.18.1.zip** and **Sprocket-Map-Framework-1.1.0.zip** downloads are also available; the loader is installed
 separately. When updating, replace Battle Editor and remove any older extra copy of `SprocketMaps.dll` before copying
 the included `BepInEx\plugins\SprocketMaps` folder. Keep the two Sandbox PNGs beside that DLL.
 
@@ -45,8 +45,11 @@ Map Framework also imports raw **OBJ, FBX and `.unitypackage`** maps, and **Garr
 addon `.gma`, an old workshop `<number>_legacy.bin`, or a `.bsp`; stock textures come from your Garry's Mod install),
 automatically. Put a source archive
 (`.zip`, `.7z` or `.unitypackage`) directly in `CustomMaps`, or put each model and its textures in a separate
-subfolder there. Nested ZIP/7z archives are unpacked. The matching **Unity 6000.3.21f1 editor must be installed and
-licensed**; it converts a private copy in the background, so no manual Unity export is needed. The editor is
+subfolder there. Nested ZIP/7z archives are unpacked. FBX models and Unity packages need the matching
+**Unity 6000.3.21f1 editor, installed and licensed**; it converts a private copy in the background, so no manual
+Unity export is needed. **OBJ and Garry's Mod maps don't need Unity** (Map Framework 1.1.0): without it, or when it
+fails, the game builds them itself and checks them once in the main menu (**Import / Build maps in the game**:
+Automatic, Always or Never). Garry's Mod maps bring their own sun, skybox or painted sky, fog and lamps. The editor is
 found wherever Unity Hub or Unity's installer put it (through Windows' installed programs and Unity Hub's records). A
 copy without an installer can be set in `BepInEx/config/local.sprocket.maps.cfg` under **Import / Unity editor path**; **Additional source folder** accepts another map folder.
 The import notice reports progress. Reopen the map picker after it finishes. Unchanged sources use their verified
@@ -59,7 +62,7 @@ adapted to the game's lighting. The importer builds collision/navigation and off
 Maps need solid ground at least 100 metres across both axes and two connected tank areas at least 100 metres apart
 (half the map's width on a smaller map).
 Conversion failures leave built-in maps available and include a diagnostic log path. The source files stay unchanged.
-The standalone **Sprocket-Map-Framework-1.0.0.zip** includes the required `SharpCompress.dll`; keep it beside
+The standalone **Sprocket-Map-Framework-1.1.0.zip** includes the required `SharpCompress.dll`; keep it beside
 `SprocketMaps.dll`. Gameplay validation remains separate from the offline conversion checks.
 An optional JSON file beside a bundle declares its checked tank capacity: for `city.bundle`, use `city.json`
 containing `{"schemaVersion":1,"spawnCount":4,"displayName":"City"}` (1 to 16 tanks per side; displayName is optional). The map picker and spawn formations use
@@ -280,6 +283,9 @@ partly:
 - The tanks' shapes in the editor.
 - Map Framework: Garry's Mod props colliding through their collision models (.phy) (converted and imported offline
   only); finding Unity through Windows' installed programs on a player's PC.
+- Map Framework 1.1.0: maps the game builds without Unity, and their check in the main menu (the conversion and the
+  OBJ reading were checked offline on real Garry's Mod maps); Garry's Mod maps' sun, sky, fog and lamps (the sky's
+  six images were checked to join up offline; its orientation in Unity and the brightness levels were not).
 
 ## Building
 

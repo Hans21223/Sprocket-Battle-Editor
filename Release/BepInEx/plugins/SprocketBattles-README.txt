@@ -1,6 +1,9 @@
-Sprocket Battle Editor 0.18.0 + Map Framework 1.0.1 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
+Sprocket Battle Editor 0.18.1 + Map Framework 1.1.0 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
+0.18.1: a shared battle brings in only its pictures (Paint and Decals), nothing else.
+Map Framework 1.1.0: OBJ and Garry's Mod maps import without Unity (the game builds them), and Garry's Mod maps
+bring their own sun, sky, fog and lamps.
 Map Framework 1.0.1: finds Unity 6000.3.21f1 wherever Unity Hub or Unity's installer put it.
 0.18.0: runs on Sprocket 0.2.55.5 and 0.2.56. Map Framework 1.0.0 imports Garry's Mod maps safely (a damaged
 collision model can't hang the import).

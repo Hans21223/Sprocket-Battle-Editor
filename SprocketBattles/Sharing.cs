@@ -89,7 +89,9 @@ public static class Sharing
             var entry = zip.GetEntry(blueprint) ?? throw new InvalidDataException($"{blueprint} is missing from it");
             designs.Add(blueprint, (Clean(Path.GetFileNameWithoutExtension(entry.Name)), Read(entry).Replace(Token, rootLink)));
         }
-        foreach (var e in zip.Entries.Where(e => e.FullName.StartsWith("pictures/") && e.Name.Length > 0))
+        // Only pictures: anything else under pictures/ (a design, a faction) would land in the importer's own folders.
+        foreach (var e in zip.Entries.Where(e => e.Name.Length > 0 && (e.FullName.StartsWith("pictures/Paint/", StringComparison.OrdinalIgnoreCase)
+                                                                      || e.FullName.StartsWith("pictures/Decals/", StringComparison.OrdinalIgnoreCase))))
         {
             var to = Path.GetFullPath(Path.Combine(full, e.FullName["pictures/".Length..]));
             // ponytail: a picture of the same name already there is kept as it is, even if it differs.

@@ -74,6 +74,7 @@
       <li><a href="#need">What you need</a></li>
       <li><a href="#quick">Quick start</a></li>
       <li><a href="#gmod">Garry's Mod maps</a></li>
+      <li><a href="#ingame">Without Unity</a></li>
       <li><a href="#rules">Map rules</a></li>
       <li><a href="#spawns">Starting areas</a></li>
       <li><a href="#materials">Materials</a></li>
@@ -95,9 +96,10 @@
 
     <h2 id="need">What you need</h2>
     <ul>
-      <li><strong>Sprocket</strong> with the Sprocket Mod Loader, <strong>Battle Editor</strong> and <strong>Map Framework 1.0.0 or newer</strong>. Water, destructible scenery and the map's own lighting need 0.5.0.</li>
+      <li><strong>Sprocket</strong> with the Sprocket Mod Loader, <strong>Battle Editor</strong> and <strong>Map Framework 1.0.0 or newer</strong> (1.1.0 to build maps without Unity). Water, destructible scenery and the map's own lighting need 0.5.0.</li>
       <li><strong>A scene</strong>: an OBJ or FBX model with its textures, a Unity scene or prefab (loose, or in a <code>.unitypackage</code>), or a <a href="#gmod">Garry's Mod map</a>.</li>
-      <li><strong>Unity 6000.3.21f1</strong>, the exact version Sprocket uses (the free Personal licence is fine). Map Framework runs it hidden in the background to convert your map. It finds the editor wherever Unity Hub or Unity's installer put it, through Windows' installed programs and Unity Hub's own records (only no-installer copies, such as one unzipped by hand, aren't found). For those, set <code>Unity editor path</code> under <code>[Import]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code>.</li>
+      <li><strong>Unity 6000.3.21f1</strong> for FBX models and Unity scenes or packages: the exact version Sprocket uses (the free Personal licence is fine). Map Framework runs it hidden in the background to convert your map. It finds the editor wherever Unity Hub or Unity's installer put it, through Windows' installed programs and Unity Hub's own records (only no-installer copies, such as one unzipped by hand, aren't found). For those, set <code>Unity editor path</code> under <code>[Import]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code>.</li>
+      <li>OBJ models and Garry's Mod maps don't need Unity: without it, the game builds them itself. See <a href="#ingame">Without Unity</a>.</li>
     </ul>
     <p>People you give a finished map to don't need Unity. See <a href="#sharing">Sharing a map</a>.</p>
 
@@ -118,9 +120,20 @@
     <ul>
       <li>The map's brushes, terrain (displacements) and props, with their textures from the addon, the map itself and Garry's Mod's own content. Install Garry's Mod for maps that use its or Half-Life 2's textures; Map Framework finds it in any Steam library. Without it those surfaces are plain.</li>
       <li>Water becomes the game's water. Props smaller than about 15 m across, and the map's physics props, become <a href="#special">breakables</a> that tanks shove aside.</li>
-      <li>Left out: tool and sky surfaces, the 3D skybox, the map's own lighting (the game's sun lights it) and anything that needs another addon's content.</li>
+      <li>The map's light and sky: its sun's direction and colour, its skybox (or Garry's Mod's painted sky), its ambient light, fog and lamps. See <a href="#lighting">Light and sky</a>.</li>
+      <li>Left out: tool and sky surfaces, the 3D skybox (the miniature scenery built around the playable area; the sky images stay) and anything that needs another addon's content.</li>
     </ul>
     <p>Maps keep Source's scale (1 unit = 1 inch), which makes props about a fifth larger than life. Many Garry's Mod maps are built for people on foot, so narrow streets hold fewer tanks: Map Framework fits as many as the streets allow, sometimes one a side, and the import fails with a message if none fit. Workshop maps belong to their authors: share a converted map only with their permission.</p>
+
+    <h2 id="ingame">Without Unity</h2>
+    <p>The game can build an OBJ map or a Garry's Mod map itself, from the converted files, without Unity. It reads the OBJ the way Unity's importer does, so the map comes out the same. <code>Build maps in the game</code> under <code>[Import]</code> chooses:</p>
+    <ul>
+      <li><strong>Automatic</strong> (the default): Unity converts the map when it is installed and works; the game builds it when Unity is missing or fails.</li>
+      <li><strong>Always</strong>: the game builds it, even with Unity installed.</li>
+      <li><strong>Never</strong>: Unity only.</li>
+    </ul>
+    <p>The first time, the map is checked as Unity's conversion checks it: ground, tank navigation and two starting areas. The check runs while the main menu is open, and the notice shows its progress. If you start a battle first, it waits and starts over in the menu. The result is kept in <code>Sprocket\BepInEx\cache\SprocketMaps-runtime\</code>, so later starts skip it. A map that fails the check isn't checked again until you change its files.</p>
+    <p>The game then builds the map each time a battle loads it, so a big map takes longer to load than a converted one. OBJ textures must be PNG or JPG (TGA and others stay plain). FBX models and Unity scenes or packages always need Unity.</p>
 
     <h2 id="rules">Map rules</h2>
     <p>The converter checks every map before it reaches the game. A map that fails tells you why on screen and changes nothing.</p>
@@ -191,6 +204,14 @@
       <li><strong>Fog</strong>: your scene's fog setting is kept.</li>
     </ul>
     <p>Brightness matches Unity's built-in renderer. If a map looks too bright or too dark, change <code>Map lighting exposure</code> under <code>[Lighting]</code> in <code>BepInEx\config\local.sprocket.maps.cfg</code> (higher is darker). To use the game's daylight instead, add an empty object named <code>Sprocket Game Lighting</code>.</p>
+    <p>A Garry's Mod map brings the light and sky it has in Garry's Mod, at the game's own exposure:</p>
+    <ul>
+      <li><strong>Sun</strong>: the game's sun takes the map's direction and colour. A daylight sun is as bright as the game's; a darker one, such as a moon, keeps its share, so a night map stays dark.</li>
+      <li><strong>Sky</strong>: the skybox's six images become the sky, or Garry's Mod's painted sky becomes a gradient. The sky also lights the scene as the map's ambient light did.</li>
+      <li><strong>Fog</strong>: the map's fog distance and density. Fogged scenery fades into the sky's own colour, so the sky shows as it does in Garry's Mod, where fog never covers it.</li>
+      <li><strong>Lamps</strong>: up to 512 of the map's lamps shine in real time near the camera, without shadows, so they can shine through walls. <code>Real-time lamp distance</code> and <code>Real-time lamp brightness</code> apply to them too.</li>
+    </ul>
+    <p>To give Garry's Mod maps the game's daylight instead, turn off <code>GMod map light and sky</code> under <code>[Lighting]</code>.</p>
 
     <h2 id="special">Special objects</h2>
     <p>Give an object one of these names (the start of its name is enough) in Blender, Unity or your modelling tool. FBX keeps object names; for OBJ, use object (<code>o</code>) or group (<code>g</code>) names.</p>
@@ -220,8 +241,8 @@
     <h2 id="sharing">Sharing a map</h2>
     <p>After a successful conversion, the finished map is in</p>
     <pre><code>Sprocket\BepInEx\cache\SprocketMaps-imports\&lt;id&gt;\Output\</code></pre>
-    <p>as a <code>.bundle</code> file and a <code>.json</code> file with the same name. Give someone both files, unrenamed, to put in their <code>CustomMaps</code> folder; their game loads the map without Unity. The <code>.json</code> sets the map's display name and how many tanks per side it holds (1 to 16).</p>
-    <p>You can also share your source folder or archive, but then the other player needs Unity to convert it.</p>
+    <p>as a <code>.bundle</code> file and a <code>.json</code> file with the same name. Give someone both files, unrenamed, to put in their <code>CustomMaps</code> folder; their game loads the map without Unity. The <code>.json</code> sets the map's display name and how many tanks per side it holds (1 to 16). A Garry's Mod map also has a <code>.source.json</code> and a <code>.sky</code> file with the same name: give those too, or it shows the game's daylight instead of its own sun and sky.</p>
+    <p>You can also share your source folder or archive. An OBJ map or a Garry's Mod map then needs no Unity on the other PC (Map Framework 1.1.0 or newer builds it in the game); FBX models and Unity packages do. A map the game built has no bundle to share: share its source.</p>
     <div class="note"><p><strong>Only share what you have the rights to.</strong> Use your own models or assets licensed for redistribution. Don't extract maps or models from other games; their terms forbid it.</p></div>
 
     <h2 id="trouble">Troubleshooting</h2>
@@ -232,7 +253,7 @@
     <div class="table-wrap"><table>
       <thead><tr><th>Message</th><th>Fix</th></tr></thead>
       <tbody>
-        <tr><td>Automatic map import needs Unity 6000.3.21f1 installed.</td><td>Install that exact version, or set its path in the config file.</td></tr>
+        <tr><td>Automatic map import needs Unity 6000.3.21f1 installed.</td><td>For FBX models and Unity packages: install that exact version, or set its path in the config file. OBJ and Garry's Mod maps are built in the game instead (unless <code>Build maps in the game</code> is Never).</td></tr>
         <tr><td>No scenery model or Unity scene found.</td><td>The folder or archive needs an OBJ, FBX, <code>.unity</code> or <code>.prefab</code>.</td></tr>
         <tr><td>Map ground must span at least 100 metres on both horizontal axes and no more than 10 kilometres.</td><td>Check the scale: many tools export in centimetres. Make sure the ground is part of the model.</td></tr>
         <tr><td>No safe connected tank formation pair exists at capacities 16, 8, 4, 2 or 1.</td><td>Add flat, open areas at least 100 m apart, joined by slopes under 23°, and mark them with the spawn area names.</td></tr>
@@ -240,6 +261,6 @@
       </tbody>
     </table></div>
 
-    <footer>Map Framework is part of the Battle Editor project for Sprocket. This guide matches Map Framework 1.0.1.</footer>
+    <footer>Map Framework is part of the Battle Editor project for Sprocket. This guide matches Map Framework 1.1.0.</footer>
   </main>
 </div>

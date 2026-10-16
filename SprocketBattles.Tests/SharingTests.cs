@@ -49,6 +49,18 @@ static class SharingTests
             Check(Sharing.Find(new[] { Path.Combine(mine, "Battles", "Shared"), Path.Combine(home, "nowhere") }).Count == 1, "found where it was shared");
             Check(!again.Battle.Locked, "shared plainly: editable");
 
+            // Someone else's zip with more than pictures under pictures/: only the pictures come in.
+            var planted = Path.Combine(home, "planted.zip");
+            File.Copy(zipPath, planted);
+            using (var z = ZipFile.Open(planted, ZipArchiveMode.Update))
+            {
+                using (var w = new StreamWriter(z.CreateEntry("pictures/Factions/Default/Blueprints/Vehicles/Free tank.blueprint").Open())) w.Write("{}");
+                using (var w = new StreamWriter(z.CreateEntry("pictures/Paint/camo.png").Open())) w.Write("png");
+            }
+            Sharing.Import(planted, theirs, TheirPath);
+            Check(!File.Exists(Path.Combine(theirs, "Factions", "Default", "Blueprints", "Vehicles", "Free tank.blueprint"))
+                  && File.Exists(Path.Combine(theirs, "Paint", "camo.png")), "a shared battle brings pictures, nothing else");
+
             var lockedZip = Sharing.Export(duel, mine, Path.Combine(mine, "Battles", "Shared"), locked: true);
             Check(!duel.Locked, "sharing locked leaves the maker's own battle editable");
             Check(Sharing.Import(lockedZip, theirs, TheirPath).Battle.Locked, "shared locked: put in locked");

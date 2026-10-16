@@ -24,7 +24,13 @@ static class MapImportTests
             Check(found.Contains("E:\\Editors\\U6\\Editor\\Unity.exe") && found.Contains(Path.Combine("F:\\Old","Editor","Unity.exe"))
                 && !found.Contains("6000.3.21f1"),"Unity Hub's editor lists give every editor path, and only paths");
         }
-        var fakeUnity = Path.Combine(Path.GetTempPath(), "SprocketMapEditorTests-" + Guid.NewGuid().ToString("N"), "6000.3.21f1");
+        Check(MapImportConversion.KnownCause("[Package Manager] Could not find Unity Package Manager local server application at [C:/x]")!.Contains("incompletely installed")
+            && MapImportConversion.KnownCause("System.IO.IOException: Sharing violation on path C:\\x\\status.txt")!.Contains("Restart Sprocket")
+            && MapImportConversion.KnownCause("SPROCKET_MAP_SPAWN_REJECTED: no clear area") == null, "Unity failures a player can fix are named");
+        var tidy = MapImportConversion.Tidy("Player connection [2880]  * \"[IP] 192.168.1.20 [Port] 55504 [Id] WindowsEditor(7,LAPTOP-EXAMPLE1) [Debug] 1\"\n"
+            + "[Licensing::IpcConnector] Channel LicenseClient-Somebody doesn't exist\nC:\\Users\\Somebody\\Documents\\x and C:/Users/Somebody/y");
+        Check(!tidy.Contains("192.168") && !tidy.Contains("LAPTOP-EXAMPLE1") && !tidy.Contains("Somebody") && tidy.Contains("[Port] 55504"), "import logs lose the PC's address, name and user name");
+        var fakeUnity =Path.Combine(Path.GetTempPath(), "SprocketMapEditorTests-" + Guid.NewGuid().ToString("N"), "6000.3.21f1");
         Directory.CreateDirectory(Path.Combine(fakeUnity, "Editor"));
         var fakeExe = Path.Combine(fakeUnity, "Editor", "Unity.exe"); File.WriteAllBytes(fakeExe, Array.Empty<byte>()); // no version metadata
         try

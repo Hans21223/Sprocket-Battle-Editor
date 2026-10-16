@@ -1,3 +1,57 @@
+# Battle Editor 0.18.1 + Map Framework 1.1.0 (Beta)
+
+Battle Editor 0.18.1:
+
+- Importing a shared battle brings in only its pictures (Paint and Decals). Before, any file a zip placed under
+  `pictures/` landed in your `My Games\Sprocket` folder, so someone else's zip could add a design to your own
+  faction, or a faction of its own. Files already there were never overwritten.
+
+Map Framework 1.1.0:
+
+- OBJ maps and Garry's Mod maps no longer need Unity. When Unity 6000.3.21f1 is missing, or fails on its own
+  (a broken install, no licence), the game builds the map itself. Garry's Mod maps are converted as before, but
+  their textures stay in their own DXT blocks, uploaded as they are. The OBJ is read the way Unity's importer
+  reads it: one part per group, X mirrored, 60° smoothing, the MTL's colour, opacity, texture and alpha map.
+  Meshes, colliders and materials are made a few milliseconds a frame while the map loads.
+- The first time, the game checks the map the way Unity's import does, while the main menu is open. It builds the
+  collision 10 km up, out of the way, and adds tank navigation. It looks for two clear, connected starting areas at
+  16, 8, 4, 2 or 1 tanks a side, trying the map's own `Sprocket Spawn Area A/B` first. The result is saved in
+  `BepInEx\cache\SprocketMaps-runtime`, so later starts skip both. A map that fails isn't checked again until its
+  files change. A battle started mid-check drops it, and the check starts again back in the menu.
+- New setting: Import > Build maps in the game.
+  - Automatic (the default): Unity when it works, the game otherwise.
+  - Always: the game, even with Unity installed.
+  - Never: Unity only.
+  - FBX models and Unity packages always need Unity: a folder or archive with no OBJ goes to Unity whatever the
+    setting, and keeps Unity's own error message.
+- Garry's Mod maps bring their own light and sky, whether Unity or the game built them:
+  - the sun's direction and colour (light_environment);
+  - the skybox's six images as an HDRI sky (Half-Life 2's half-height sides on the top half of their faces, as Source
+    shows them), or GMod's painted sky (env_skypaint) as a gradient;
+  - the ambient light, through the sky;
+  - fog (env_fog_controller);
+  - the map's lamps (light, light_spot) as real-time lights near the camera.
+
+  A daylight map's sun is as bright as the game's sun, a darker one keeps its share, and the sky and lamps keep
+  their proportion to the sun, as Source baked them. Fogged scenery fades into the sky's own colour: Source never
+  fogs its skybox, HDRP fogs everything. Maps converted by Unity before this get their light and sky on the next
+  start, without converting again. Lighting > GMod map light and sky (on by default) turns it off.
+- Left out: the 3D skybox, a Garry's Mod map's miniature scenery around the playable area (the skybox images are kept).
+  Lamps have no shadows, so they can shine through walls.
+- Blender's underscores (`Sprocket_Water_Surface`) are read as the marker names, as the Unity import does.
+
+Also in 1.1.0 (from 1.0.2, which wasn't released on its own):
+
+- Fix an import failing at random with "Sharing violation on path ...status.txt" (a player's import, 2026-10-17).
+  The game read Unity's progress file once a second in a way that blocked writing, so a progress update landing
+  at that moment stopped Unity's import script. The game now reads it without blocking.
+- A failed import names the cause a player can fix, from the converter's report or Unity's log: Unity installed
+  incompletely (Package Manager missing), no Unity licence, out of memory, or a busy file. Before, everything
+  that stopped Unity before the map was checked read "Check its ground, textures and tank clearance".
+- `import.log` loses the PC's local network address, computer name and Windows user name once Unity exits:
+  players post it in public, and Unity writes all three.
+- The import script is unchanged, so no map converts again.
+
 # Map Framework 1.0.1
 
 - Automatic import finds Unity 6000.3.21f1 wherever it is installed. It looked only in Unity Hub's default folder

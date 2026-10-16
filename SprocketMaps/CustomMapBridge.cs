@@ -25,7 +25,10 @@ internal static class CustomMapBridge
 {
     internal const string Carrier = "Sandbox (Low performance)";
     internal const float SpawnSpacing = 8;
-    internal sealed record Definition(string Identifier, string ScenePath, AssetBundle Bundle, Maps.Map Map, CustomMapManifest.Lighting? Lighting = null);
+    /// A map from a scene bundle (`Bundle`, `ScenePath`), or one the game builds itself (`Runtime`: its folder and
+    /// map.json). `Source`: a Garry's Mod map's own light and sky, with the folder its files are in.
+    internal sealed record Definition(string Identifier, string ScenePath, AssetBundle? Bundle, Maps.Map Map, CustomMapManifest.Lighting? Lighting = null,
+        SourceLighting.Settings? Source = null, string? SourceFolder = null, (string Folder, RuntimeMapFiles.Manifest Manifest)? Runtime = null);
     static readonly Dictionary<string, Definition> definitions = new(StringComparer.OrdinalIgnoreCase);
     static readonly Dictionary<string, string> failures = new(StringComparer.OrdinalIgnoreCase);
     static string? disabledReason;
@@ -81,15 +84,40 @@ internal static class CustomMapBridge
             if (found.Count == 0) throw new InvalidOperationException("The map file has no unique scene name.");
         }
         catch { bundle.Unload(true); throw; }
+        var source = ReadSourceLighting(Path.ChangeExtension(file, ".source.json"));
         foreach (var (name, path) in found)
         {
             var map = new Maps.Map(name, capacity, "custom map with the native game controller", Carrier,
                 Description: $"Custom map: {displayName ?? name}. Up to {capacity} tanks per side. Uses the game's normal vehicle designer and battle controls.",
                 DisplayName: displayName);
-            definitions.Add(name, new Definition(name, path, bundle, map, metadata.Lighting));
+            definitions.Add(name, new Definition(name, path, bundle, map, metadata.Lighting, source, Path.GetDirectoryName(file)));
             if (disabledReason != null) failures[name] = disabledReason;
-            Plugin.ModLog.LogInfo($"Custom environment registered: '{name}', scene='{path}', native carrier='{Carrier}', bundle='{file}'");
+            Plugin.ModLog.LogInfo($"Custom environment registered: '{name}', scene='{path}', native carrier='{Carrier}', bundle='{file}'{(source != null ? ", with the map's own light and sky" : "")}");
         }
+    }
+
+    /// A map the game builds itself, from its checked map.json.
+    internal static void RegisterRuntime(string folder, RuntimeMapFiles.Manifest manifest)
+    {
+        if (disabledReason != null) throw new InvalidOperationException(disabledReason);
+        var name = manifest.Name;
+        if (MapOwnership.IsNativeMap(name)) throw new InvalidOperationException("The map name belongs to a built-in map.");
+        if (definitions.ContainsKey(name)) return;
+        var input = Path.Combine(folder, "Input");
+        var source = manifest.Lighting == null ? null : ReadSourceLighting(Path.Combine(input, manifest.Lighting));
+        var capacity = (ushort)manifest.Capacity;
+        var map = new Maps.Map(name, capacity, "custom map built in the game", Carrier,
+            Description: $"Custom map: {manifest.DisplayName}. Up to {capacity} tanks per side. Uses the game's normal vehicle designer and battle controls.",
+            DisplayName: manifest.DisplayName);
+        definitions.Add(name, new Definition(name, "", null, map, null, source, input, (folder, manifest)));
+        Plugin.ModLog.LogInfo($"Custom environment registered: '{name}', built in the game from '{manifest.Model}', native carrier='{Carrier}'{(source != null ? ", with the map's own light and sky" : "")}");
+    }
+
+    static SourceLighting.Settings? ReadSourceLighting(string file)
+    {
+        try { return File.Exists(file) && new FileInfo(file).Length < 4 << 20 ? SourceLighting.Read(File.ReadAllText(file)) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        { Plugin.ModLog.LogWarning($"The map's own light and sky ({Path.GetFileName(file)}) could not be read: {ex.Message}"); return null; }
     }
 
     internal static bool Resolve(SceneDatabase database, string name, out SprocketScene? native)
@@ -190,21 +218,39 @@ internal static class CustomMapBridge
             // Unity cannot cancel an additive scene load. Finish removing a previous request before starting
             // another one so identical scene paths cannot be confused with each other's owned scene.
             if (retired.Count != 0) return;
-            if (Time.realtimeSinceStartup - s.Since > 120) throw new TimeoutException("The map took too long to load.");
-            if (s.Operation == null)
+            // A map the game builds itself takes longer than a bundle's scene: a city is half a gigabyte of OBJ.
+            if (Time.realtimeSinceStartup - s.Since > (s.Definition.Runtime != null ? 600 : 120)) throw new TimeoutException("The map took too long to load.");
+            if (s.Operation == null && s.Building == null)
             {
                 s.StartSceneLoad();
                 return;
             }
-            if (s.Operation?.isDone != true) return;
-            s.CaptureLoadedScene();
-            if (!s.Prepared)
+            if (s.Building != null)
             {
-                var scene = s.CustomScene;
-                if (!scene.IsValid() || !scene.isLoaded) throw new InvalidOperationException("The custom environment scene did not load.");
-                s.CustomScene = scene;
-                Prepare(s, scene);
-                return;
+                if (!s.Building.Done)
+                {
+                    if (!s.Building.Step()) return;
+                    s.Lifetime.SceneLoadFinished();
+                    Plugin.ModLog.LogInfo($"Custom environment built in the game: '{s.Definition.Identifier}', {s.Building.Parts} parts, {s.Building.MissingTextures} textures missing, {Time.realtimeSinceStartup - s.Since:0.0} s");
+                }
+                if (!s.Prepared)
+                {
+                    Prepare(s, new[] { s.Building.Root! }, s.Controller.gameObject.scene);
+                    return;
+                }
+            }
+            else
+            {
+                if (s.Operation?.isDone != true) return;
+                s.CaptureLoadedScene();
+                if (!s.Prepared)
+                {
+                    var scene = s.CustomScene;
+                    if (!scene.IsValid() || !scene.isLoaded) throw new InvalidOperationException("The custom environment scene did not load.");
+                    s.CustomScene = scene;
+                    Prepare(s, scene.GetRootGameObjects(), scene);
+                    return;
+                }
             }
             if (s.NavigationOperation?.isDone == false) return;
             CompleteEnvironment(s);
@@ -213,9 +259,9 @@ internal static class CustomMapBridge
         catch (Exception ex) { Recover(s, ex); }
     }
 
-    static void Prepare(Session s, Scene scene)
+    static void Prepare(Session s, IEnumerable<GameObject> roots, Scene scene)
     {
-        foreach (var root in scene.GetRootGameObjects())
+        foreach (var root in roots)
         {
             s.Roots.Add(root);
             // Environment bundles cannot supply game code, game input, or another player/controller.
@@ -243,6 +289,8 @@ internal static class CustomMapBridge
         Optional("the game's water", () => NativeWater.Apply(s.Environment, s.Roots, s.Owned));
         HideCarrierEnvironment(s);
         Optional("the map's own lighting", () => MapLighting.Apply(s.Definition.Lighting, s.Controller.gameObject.scene, s.Roots, s.Environment, s.Owned, s.Undo));
+        if (s.Definition.Source is { } source)
+            Optional("the map's own sky and sun", () => MapLighting.ApplySource(source, s.Definition.SourceFolder ?? "", s.Controller.gameObject.scene, s.Roots, s.Environment, s.Bounds, s.Owned, s.Undo));
         Physics.SyncTransforms();
         // Match the carrier's serialized tank agent (radius, height, climb and slope), rather than editor defaults.
         var settings = s.NativeNavigation.Count > 0 ? s.NativeNavigation[0].Item.GetBuildSettings() : NavMesh.GetSettingsByID(0);
@@ -277,7 +325,9 @@ internal static class CustomMapBridge
         s.BuildMap = s.Definition.Map with { Attackers = a, Defenders = d };
         // Merging drops the map scene's lightmaps, so its baked light went missing (Demo City's lamp-lit streets went
         // dark, 2026-10-11). A lightmapped map stays a scene of its own; cleanup unloads it when the battle ends.
-        if (!s.Roots.SelectMany(r => r.GetComponentsInChildren<Renderer>(true)).Any(r => r.lightmapIndex is >= 0 and < 65534))
+        // A map built in the game is already in the carrier's scene.
+        if (!s.CustomScene.IsValid()) s.Merged = true;
+        else if (!s.Roots.SelectMany(r => r.GetComponentsInChildren<Renderer>(true)).Any(r => r.lightmapIndex is >= 0 and < 65534))
         {
             UnityEngine.SceneManagement.SceneManager.MergeScenes(s.CustomScene, s.Controller.gameObject.scene);
             s.Merged = true;
@@ -419,15 +469,16 @@ internal static class CustomMapBridge
             .ToArray();
         foreach (var collider in shoved) collider.enabled = false;
         Physics.SyncTransforms();
-        try { return OpenSpawnAnchors(s); }
+        try { var (a, d, _, _) = FindStarts(s.Environment!, s.Bounds, s.Definition.Map.Spawns, s.Definition.Identifier); return (a, d); }
         finally { foreach (var collider in shoved) if (collider) collider.enabled = true; Physics.SyncTransforms(); }
     }
 
-    static (Vector2 A, Vector2 D) OpenSpawnAnchors(Session s)
+    /// Two unobstructed, level, connected areas inside the map (`environment`) for `spawns` tanks a side, rather than the
+    /// carrier's spawn positions: each team's front row (A, D) and the areas' centres. A map's "Sprocket Spawn Area A/B"
+    /// markers are tried first. Also the in-game import's check (RuntimeMapImport). Throws if there are none.
+    internal static (Vector2 A, Vector2 D, Vector3 CentreA, Vector3 CentreD) FindStarts(GameObject environment, Bounds bounds, ushort spawns, string identifier)
     {
-        // Find two unobstructed, level areas inside the custom map, rather than using the carrier's spawn positions.
         var candidates = new List<Vector3>();
-        var bounds = s.Bounds;
         using var navigation = new CustomMapPathQuery();
         var groundCache = new Dictionary<(float X, float Z), Vector3?>();
         bool GroundAt(float x, float z, out Vector3 point)
@@ -439,7 +490,7 @@ internal static class CustomMapBridge
             groundCache[(x, z)] = null;
             var from = new Vector3(x, bounds.max.y + 100, z);
             if (!Physics.Raycast(from, Vector3.down, out var hit, bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore)
-                || hit.collider == null || s.Environment == null || !hit.collider.transform.IsChildOf(s.Environment.transform)
+                || hit.collider == null || !hit.collider.transform.IsChildOf(environment.transform)
                 || hit.normal.y < 0.95f) return false;
             if (!navigation.Contains(hit.point)) return false;
             point = hit.point;
@@ -452,7 +503,7 @@ internal static class CustomMapBridge
         {
             point = default;
             if (!Physics.Raycast(new Vector3(x, bounds.max.y + 100, z), Vector3.down, out var hit, bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore)
-                || hit.collider == null || s.Environment == null || !hit.collider.transform.IsChildOf(s.Environment.transform)
+                || hit.collider == null || !hit.collider.transform.IsChildOf(environment.transform)
                 || hit.normal.y < 0.95f) return false;
             point = hit.point;
             return true;
@@ -465,9 +516,9 @@ internal static class CustomMapBridge
             var direction = toward - at; direction.y = 0;
             var facing = Quaternion.LookRotation(direction);
             var side = facing * Vector3.right; var back = facing * Vector3.back;
-            for (int i = 0; i < s.Definition.Map.Spawns; i++)
+            for (int i = 0; i < spawns; i++)
             {
-                var offset = SpawnFormation.Offset(s.Definition.Map.Spawns, i, SpawnSpacing);
+                var offset = SpawnFormation.Offset(spawns, i, SpawnSpacing);
                 var place = at + side * offset.Side + back * offset.Back;
                 if (!GroundAt(place.x, place.z, out var ground)) { why = $"tank {i} at {place}: no drivable ground"; return false; }
                 if (Math.Abs(ground.y - at.y) > 1) { why = $"tank {i} at {place}: ground {ground.y - at.y:0.0} m off level"; return false; }
@@ -485,7 +536,7 @@ internal static class CustomMapBridge
         Vector3 FrontRow(Vector3 center, Vector3 toward)
         {
             var forward = toward - center; forward.y = 0;
-            return center + forward.normalized * SpawnFormation.FrontDistance(s.Definition.Map.Spawns, SpawnSpacing);
+            return center + forward.normalized * SpawnFormation.FrontDistance(spawns, SpawnSpacing);
         }
         bool ValidPair(Vector3 p, Vector3 q, out Vector3 first, out Vector3 second)
         {
@@ -495,17 +546,17 @@ internal static class CustomMapBridge
             if (navigation.Connects(p, q)) return true;
             why = "no tank route between the starts"; return false;
         }
-        var transforms = s.Environment!.GetComponentsInChildren<Transform>(true);
+        var transforms = environment.GetComponentsInChildren<Transform>(true);
         var authoredA = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area A");
         var authoredD = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area B");
         if (authoredA != null && authoredD != null)
         {
             if (GroundAt(authoredA.position.x, authoredA.position.z, out var pa) && GroundAt(authoredD.position.x, authoredD.position.z, out var pd))
             {
-                if (ValidPair(pa, pd, out var startA, out var startD)) return (new Vector2(startA.x, startA.z), new Vector2(startD.x, startD.z));
+                if (ValidPair(pa, pd, out var startA, out var startD)) return (new Vector2(startA.x, startA.z), new Vector2(startD.x, startD.z), pa, pd);
             }
             else why = "a starting area has no drivable ground";
-            Plugin.ModLog.LogWarning($"'{s.Definition.Identifier}': the map's starting areas don't pass here ({why}); searching the map instead.");
+            Plugin.ModLog.LogWarning($"'{identifier}': the map's starting areas don't pass here ({why}); searching the map instead.");
         }
         var min = bounds.min; var max = bounds.max;
         for (int z = 1; z <= 31; z++)
@@ -513,26 +564,27 @@ internal static class CustomMapBridge
             {
                 float px = Mathf.Lerp(min.x, max.x, x / 32f), pz = Mathf.Lerp(min.z, max.z, z / 32f);
                 if (!GroundAt(px, pz, out var ground)) continue;
-                float half = Math.Max(SpawnFormation.ColumnCount(s.Definition.Map.Spawns), SpawnFormation.RowCount(s.Definition.Map.Spawns)) * SpawnSpacing / 2;
+                float half = Math.Max(SpawnFormation.ColumnCount(spawns), SpawnFormation.RowCount(spawns)) * SpawnSpacing / 2;
                 if (Physics.CheckBox(ground + Vector3.up * 3, new Vector3(half, 2.4f, half), Quaternion.identity, ~0, QueryTriggerInteraction.Ignore)) continue;
                 candidates.Add(ground);
             }
         if (candidates.Count < 2) throw new InvalidOperationException("This map needs two open spawn areas large enough for its declared tank capacity.");
-        var a = candidates[0]; var d = candidates[1]; float distance = 0;
+        var a = candidates[0]; var d = candidates[1]; var centreA = a; var centreD = d; float distance = 0;
         var pairs = CustomMapNavigation.FarthestPairs(candidates.Select(point =>
             new CustomMapNavigation.Vertex(point.x, point.y, point.z)).ToArray(), 512, apart * apart);
         // Bound expensive physics/path queries; a large city with disconnected roofs must not freeze the UI.
         foreach (var pair in pairs)
             if (ValidPair(candidates[pair.First], candidates[pair.Second], out var first, out var second))
-            { a = first; d = second; distance = pair.DistanceSquared; break; }
+            { a = first; d = second; centreA = candidates[pair.First]; centreD = candidates[pair.Second]; distance = pair.DistanceSquared; break; }
         if (distance < apart * apart) throw new InvalidOperationException($"This map needs two connected, clear team spawn formations at least {apart:0} metres apart.");
-        return (new Vector2(a.x, a.z), new Vector2(d.x, d.z));
+        return (new Vector2(a.x, a.z), new Vector2(d.x, d.z), centreA, centreD);
     }
 
     static void HideCarrierEnvironment(Session s)
     {
         foreach (var root in s.Controller.gameObject.scene.GetRootGameObjects())
         {
+            if (s.Environment != null && root.Pointer == s.Environment.Pointer) continue; // a map built in the game is in the carrier's scene
             foreach (var surface in root.GetComponentsInChildren<NavMeshSurface>(true))
             {
                 if (Protected(surface)) continue;
@@ -903,6 +955,7 @@ internal static class CustomMapBridge
         internal readonly NativeCompletion Completion = new(Il2CppSystem.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly float Since = Time.realtimeSinceStartup;
         internal AsyncOperation? Operation, NavigationOperation, UnloadOperation;
+        internal RuntimeMapBuild? Building; // a map the game builds itself, instead of a bundle's scene load
         internal NativeTask? InitTask;
         internal Scene CustomScene;
         internal List<Destructibles.Item> Destructibles = new(); // breakables and trees: set aside while starts are checked
@@ -946,6 +999,14 @@ internal static class CustomMapBridge
 
         internal void StartSceneLoad()
         {
+            if (Definition.Runtime is { } runtime)
+            {
+                // Built straight into the carrier's scene (this Unity build can't create a scene of its own).
+                Building = new RuntimeMapBuild(runtime.Folder, runtime.Manifest, check: false, Controller.gameObject.scene, Vector3.zero);
+                Lifetime.SceneLoadStarted();
+                Plugin.ModLog.LogInfo($"Building custom environment '{Definition.Identifier}' in the game before native game initialization.");
+                return;
+            }
             for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
             {
                 var existing = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
@@ -977,6 +1038,8 @@ internal static class CustomMapBridge
         {
             // A native initialization already in progress may still be reading these roots and colliders.
             if (InitTask?.IsCompleted == false) return false;
+            // A map being built in the game stops at once: its reading is cancelled and what was made is destroyed below.
+            if (Building is { Done: false }) { Building.Dispose(); Lifetime.SceneLoadFinished(); }
             CaptureLoadedScene();
             if (NavigationOperation?.isDone == false && Navigation != null && !navigationCanceled)
             { NavMeshBuilder.Cancel(Navigation); navigationCanceled = true; }
@@ -1013,6 +1076,7 @@ internal static class CustomMapBridge
                         ?? throw new InvalidOperationException("Unity did not start removing the rejected custom scene.");
                 foreach (var material in Materials) if (material) UnityEngine.Object.Destroy(material);
                 foreach (var item in Owned) if (item) UnityEngine.Object.Destroy(item);
+                Building?.Dispose(); // its meshes and textures
                 Materials.Clear(); Owned.Clear(); Roots.Clear();
                 Physics.SyncTransforms();
                 disposed = true;

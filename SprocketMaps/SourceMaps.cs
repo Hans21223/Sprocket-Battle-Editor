@@ -279,26 +279,16 @@ internal static class SourceMaps
 
     // ------------------------------------------------------------------------------------------------ textures
 
-    /// The largest mip of a VTF's first frame, as RGBA rows from the top.
-    static (int Width, int Height, byte[] Rgba) Vtf(byte[] d)
+    /// A VTF's header, and where its image data starts: mips are stored smallest first, each holding every frame and face
+    /// (`Layers`) and slice.
+    static (int Width, int Height, int Format, int Mips, int Layers, int Depth, long Start) VtfHeader(byte[] d)
     {
         if (d.Length < 64 || d[0] != 'V' || d[1] != 'T' || d[2] != 'F') throw new InvalidDataException("not a VTF");
         uint minor = U32(d, 8), header = U32(d, 12);
         int width = U16(d, 16), height = U16(d, 18), frames = Math.Max(1, (int)U16(d, 24));
         uint flags = U32(d, 20);
-        int format = I32(d, 52), mips = d[56], lowFormat = I32(d, 57), lowW = d[61], lowH = d[62];
+        int format = I32(d, 52), mips = Math.Max(1, (int)d[56]), lowFormat = I32(d, 57), lowW = d[61], lowH = d[62];
         int depth = minor >= 2 ? Math.Max(1, (int)U16(d, 63)) : 1, faces = (flags & 0x4000) != 0 ? 6 : 1;
-        long Size(int f, int w, int h) => f switch
-        {
-            13 or 20 => (long)Math.Max(1, (w + 3) / 4) * Math.Max(1, (h + 3) / 4) * 8,
-            14 or 15 => (long)Math.Max(1, (w + 3) / 4) * Math.Max(1, (h + 3) / 4) * 16,
-            0 or 1 or 11 or 12 or 16 or 23 => (long)w * h * 4,
-            2 or 3 or 9 or 10 => (long)w * h * 3,
-            4 or 6 or 17 or 18 or 19 or 21 or 22 => (long)w * h * 2,
-            5 or 8 => (long)w * h,
-            24 or 25 => (long)w * h * 8,
-            _ => throw new InvalidDataException("VTF image format " + f),
-        };
         long start;
         if (minor >= 3)
         {
@@ -307,10 +297,29 @@ internal static class SourceMaps
                 if (d[80 + 8 * i] == 0x30 && d[81 + 8 * i] == 0 && d[82 + 8 * i] == 0) start = U32(d, 84 + 8 * i);
             if (start < 0) throw new InvalidDataException("VTF without an image");
         }
-        else start = header + (lowFormat != -1 && lowW > 0 ? Size(lowFormat, lowW, lowH) : 0);
+        else start = header + (lowFormat != -1 && lowW > 0 ? VtfSize(lowFormat, lowW, lowH) : 0);
+        return (width, height, format, mips, frames * faces, depth, start);
+    }
+
+    static long VtfSize(int f, int w, int h) => f switch
+    {
+        13 or 20 => (long)Math.Max(1, (w + 3) / 4) * Math.Max(1, (h + 3) / 4) * 8,
+        14 or 15 => (long)Math.Max(1, (w + 3) / 4) * Math.Max(1, (h + 3) / 4) * 16,
+        0 or 1 or 11 or 12 or 16 or 23 => (long)w * h * 4,
+        2 or 3 or 9 or 10 => (long)w * h * 3,
+        4 or 6 or 17 or 18 or 19 or 21 or 22 => (long)w * h * 2,
+        5 or 8 => (long)w * h,
+        24 or 25 => (long)w * h * 8,
+        _ => throw new InvalidDataException("VTF image format " + f),
+    };
+
+    /// The largest mip of a VTF's first frame, as RGBA rows from the top.
+    static (int Width, int Height, byte[] Rgba) Vtf(byte[] d)
+    {
+        var (width, height, format, mips, layers, depth, start) = VtfHeader(d);
         for (int mip = mips - 1; mip > 0; mip--)
-            start += Size(format, Math.Max(1, width >> mip), Math.Max(1, height >> mip)) * frames * faces * Math.Max(1, depth >> mip);
-        if (start < 0 || start + Size(format, width, height) > d.Length) throw new InvalidDataException("VTF image cut short");
+            start += VtfSize(format, Math.Max(1, width >> mip), Math.Max(1, height >> mip)) * layers * Math.Max(1, depth >> mip);
+        if (start < 0 || start + VtfSize(format, width, height) > d.Length) throw new InvalidDataException("VTF image cut short");
         int at = (int)start;
         var rgba = new byte[width * height * 4];
         if (format is 13 or 20 or 14 or 15) { Dxt(d, at, width, height, format is 14 ? 2 : format is 15 ? 3 : 1, rgba); return (width, height, rgba); }
@@ -339,6 +348,37 @@ internal static class SourceMaps
             rgba[4 * i] = r; rgba[4 * i + 1] = g; rgba[4 * i + 2] = b; rgba[4 * i + 3] = a;
         }
         return (width, height, rgba);
+    }
+
+    /// A VTF's first frame as a Map Framework texture for maps the game builds: DXT1 and DXT5 keep their own blocks and
+    /// mips (no decoding); other formats are decoded and given a box-filtered mip chain. Rows are turned bottom-up for Unity.
+    internal static MapTexture.Image VtfImage(byte[] d)
+    {
+        var (width, height, format, mips, layers, depth, start) = VtfHeader(d);
+        var kind = format switch { 13 or 20 => MapTexture.Format.Dxt1, 15 => MapTexture.Format.Dxt5, _ => MapTexture.Format.Rgba32 };
+        if (kind != MapTexture.Format.Rgba32 && width % 4 == 0 && height % 4 == 0 && width > 0 && height > 0)
+        {
+            var offsets = new long[mips];
+            long at = start;
+            for (int mip = mips - 1; mip >= 0; mip--)
+            {
+                offsets[mip] = at;
+                at += VtfSize(format, Math.Max(1, width >> mip), Math.Max(1, height >> mip)) * layers * Math.Max(1, depth >> mip);
+            }
+            if (at > d.Length) throw new InvalidDataException("VTF image cut short");
+            var list = new byte[mips][];
+            for (int mip = 0; mip < mips; mip++)
+            {
+                int w = Math.Max(1, width >> mip), h = Math.Max(1, height >> mip);
+                var block = d.AsSpan((int)offsets[mip], MapTexture.MipBytes(kind, w, h)).ToArray();
+                list[mip] = MapTexture.Flip(kind, block, w, h);
+            }
+            return new(kind, width, height, list);
+        }
+        var (fw, fh, rgba) = Vtf(d);
+        var chain = MapTexture.Mips(rgba, fw, fh);
+        for (int mip = 0; mip < chain.Length; mip++) chain[mip] = MapTexture.Flip(MapTexture.Format.Rgba32, chain[mip], Math.Max(1, fw >> mip), Math.Max(1, fh >> mip));
+        return new(MapTexture.Format.Rgba32, fw, fh, chain);
     }
 
     /// DXT1 (kind 1), DXT3 (2) and DXT5 (3) blocks to RGBA.
@@ -568,54 +608,61 @@ internal static class SourceMaps
 
     // ------------------------------------------------------------------------------------------------ the map
 
-    /// Writes <map>.obj, materials.mtl and textures/*.png into output. Returns a one-line summary.
-    internal static string Convert(string source, string output, IEnumerable<string> games, CancellationToken token)
+    /// A Source map opened for reading: its lumps, its entities, the files it sees (addon, pak lump, Garry's Mod's
+    /// content) and its 3D skybox (the area of the leaf holding sky_camera).
+    sealed class Bsp : IDisposable
     {
-        Addon? addon = null;
-        byte[] b;
-        string mapName;
-        if (!Path.GetExtension(source).Equals(".bsp", StringComparison.OrdinalIgnoreCase)) // an addon: .gma, or a legacy .bin
+        internal readonly byte[] B;
+        internal readonly string Name;
+        internal readonly List<Dictionary<string, string>> Entities;
+        internal readonly Content Content;
+        readonly (Vector Normal, float Dist)[] planes;
+        readonly (int Plane, int Front, int Back)[] nodes;
+        internal readonly (int Area, int First, int Count)[] Leaves;
+        internal readonly int[] LeafFaces;
+        internal readonly HashSet<int> SkyFaces = new();
+        readonly int? skyArea;
+
+        internal Bsp(string source, IEnumerable<string> games)
         {
-            addon = new Addon(source);
-            var map = addon.MapFile ?? throw new InvalidDataException("This Garry's Mod addon has no map (maps/*.bsp).");
-            b = addon.Read(map); mapName = Path.GetFileNameWithoutExtension(map);
+            Addon? addon = null;
+            if (!Path.GetExtension(source).Equals(".bsp", StringComparison.OrdinalIgnoreCase)) // an addon: .gma, or a legacy .bin
+            {
+                addon = new Addon(source);
+                var map = addon.MapFile ?? throw new InvalidDataException("This Garry's Mod addon has no map (maps/*.bsp).");
+                B = addon.Read(map); Name = Path.GetFileNameWithoutExtension(map);
+            }
+            else { B = File.ReadAllBytes(source); Name = Path.GetFileNameWithoutExtension(source); }
+            if (B.Length < 1036 || Encoding.ASCII.GetString(B, 0, 4) != "VBSP") throw new InvalidDataException("This is not a Source engine map.");
+            if (I32(B, 4) is < 19 or > 21) throw new InvalidDataException("Source map version " + I32(B, 4) + " is not supported (19 to 21 are).");
+            planes = Items(1, 20, (a, o) => (Normal: Vec(a, o), Dist: F32(a, o + 12)));
+            nodes = Items(5, 32, (a, o) => (Plane: I32(a, o), Front: I32(a, o + 4), Back: I32(a, o + 8)));
+            LeafFaces = Items(16, 2, (a, o) => (int)U16(a, o));
+            int leafSize = I32(B, 8 + 16 * 10 + 8) == 1 ? 32 : 56; // lump version 1 dropped the ambient light cube
+            Leaves = Items(10, leafSize, (a, o) => (Area: I16(a, o + 6) & 0x1ff, First: (int)U16(a, o + 20), Count: (int)U16(a, o + 22)));
+            var entityLump = Lump(0);
+            Entities = Regex.Matches(Encoding.Latin1.GetString(entityLump.Array!, entityLump.Offset, entityLump.Count), "\\{([^}]*)\\}")
+                .Select(m => Regex.Matches(m.Groups[1].Value, "\"([^\"]*)\"\\s+\"([^\"]*)\"").GroupBy(k => k.Groups[1].Value.ToLowerInvariant()).ToDictionary(g => g.Key, g => g.Last().Groups[2].Value)).ToList();
+            Content = new Content(addon, Lump(40), games);
+            if (Entities.FirstOrDefault(e => e.GetValueOrDefault("classname") == "sky_camera") is { } sky && nodes.Length > 0 && Leaves.Length > 0)
+            {
+                skyArea = Leaves[LeafAt(Parse(sky.GetValueOrDefault("origin", "0 0 0")))].Area;
+                foreach (var leaf in Leaves.Where(l => l.Area == skyArea))
+                    for (int i = leaf.First; i < leaf.First + leaf.Count && i < LeafFaces.Length; i++) SkyFaces.Add(LeafFaces[i]);
+            }
         }
-        else { b = File.ReadAllBytes(source); mapName = Path.GetFileNameWithoutExtension(source); }
-        if (b.Length < 1036 || Encoding.ASCII.GetString(b, 0, 4) != "VBSP") throw new InvalidDataException("This is not a Source engine map.");
-        if (I32(b, 4) is < 19 or > 21) throw new InvalidDataException("Source map version " + I32(b, 4) + " is not supported (19 to 21 are).");
-        ArraySegment<byte> Lump(int i)
+
+        internal ArraySegment<byte> Lump(int i)
         {
-            int off = I32(b, 8 + 16 * i), len = I32(b, 12 + 16 * i);
-            if (off < 0 || len < 0 || (long)off + len > b.Length) throw new InvalidDataException("A map lump lies outside the file.");
-            return Unpack(new ArraySegment<byte>(b, off, len));
+            int off = I32(B, 8 + 16 * i), len = I32(B, 12 + 16 * i);
+            if (off < 0 || len < 0 || (long)off + len > B.Length) throw new InvalidDataException("A map lump lies outside the file.");
+            return Unpack(new ArraySegment<byte>(B, off, len));
         }
-        T[] Items<T>(int lump, int size, Func<byte[], int, T> read)
+        internal T[] Items<T>(int lump, int size, Func<byte[], int, T> read)
         {
             var l = Lump(lump); var a = l.Array!;
             return Enumerable.Range(0, l.Count / size).Select(k => read(a, l.Offset + k * size)).ToArray();
         }
-        var planes = Items(1, 20, (a, o) => (Normal: Vec(a, o), Dist: F32(a, o + 12)));
-        var verts = Items(3, 12, Vec);
-        var edges = Items(12, 4, (a, o) => (U16(a, o), U16(a, o + 2)));
-        var surfedges = Items(13, 4, I32);
-        var texinfo = Items(6, 72, (a, o) => (S: new[] { F32(a, o), F32(a, o + 4), F32(a, o + 8), F32(a, o + 12) }, T: new[] { F32(a, o + 16), F32(a, o + 20), F32(a, o + 24), F32(a, o + 28) }, Flags: I32(a, o + 64), Data: I32(a, o + 68)));
-        var texdata = Items(2, 32, (a, o) => (Name: I32(a, o + 12), Width: I32(a, o + 16), Height: I32(a, o + 20)));
-        var faces = Items(7, 56, (a, o) => (Plane: (int)U16(a, o), FirstEdge: I32(a, o + 4), Edges: (int)I16(a, o + 8), TexInfo: (int)I16(a, o + 10), Disp: (int)I16(a, o + 12)));
-        var models = Items(14, 48, (a, o) => (First: I32(a, o + 40), Count: I32(a, o + 44)));
-        var nodes = Items(5, 32, (a, o) => (Plane: I32(a, o), Front: I32(a, o + 4), Back: I32(a, o + 8)));
-        var leafFaces = Items(16, 2, (a, o) => (int)U16(a, o));
-        int leafSize = I32(b, 8 + 16 * 10 + 8) == 1 ? 32 : 56; // lump version 1 dropped the ambient light cube
-        var leaves = Items(10, leafSize, (a, o) => (Area: I16(a, o + 6) & 0x1ff, First: (int)U16(a, o + 20), Count: (int)U16(a, o + 22)));
-        var dispinfo = Items(26, 176, (a, o) => (Start: Vec(a, o), VertStart: I32(a, o + 12), Power: I32(a, o + 20)));
-        var dispverts = Items(33, 20, (a, o) => (Offset: Vec(a, o), Dist: F32(a, o + 12)));
-        var strings = Lump(43); var table = Items(44, 4, I32);
-        var names = table.Select(o => { int at = strings.Offset + o, end = Array.IndexOf(strings.Array!, (byte)0, at); return Encoding.Latin1.GetString(strings.Array!, at, Math.Max(0, end - at)); }).ToArray();
-        var entityLump = Lump(0);
-        var entities = Regex.Matches(Encoding.Latin1.GetString(entityLump.Array!, entityLump.Offset, entityLump.Count), "\\{([^}]*)\\}")
-            .Select(m => Regex.Matches(m.Groups[1].Value, "\"([^\"]*)\"\\s+\"([^\"]*)\"").GroupBy(k => k.Groups[1].Value.ToLowerInvariant()).ToDictionary(g => g.Key, g => g.Last().Groups[2].Value)).ToList();
-        using var content = new Content(addon, Lump(40), games);
-
-        // The 3D skybox: the area of the leaf holding sky_camera.
         int LeafAt(Vector p)
         {
             int n = 0;
@@ -624,16 +671,33 @@ internal static class SourceMaps
                 var plane = planes[nodes[n].Plane];
                 n = Vector.Dot(plane.Normal, p) - plane.Dist >= 0 ? nodes[n].Front : nodes[n].Back;
             }
-            return Math.Clamp(-1 - n, 0, leaves.Length - 1);
+            return Math.Clamp(-1 - n, 0, Leaves.Length - 1);
         }
-        var skyFaces = new HashSet<int>(); int? skyArea = null;
-        if (entities.FirstOrDefault(e => e.GetValueOrDefault("classname") == "sky_camera") is { } sky && nodes.Length > 0 && leaves.Length > 0)
-        {
-            skyArea = leaves[LeafAt(Parse(sky.GetValueOrDefault("origin", "0 0 0")))].Area;
-            foreach (var leaf in leaves.Where(l => l.Area == skyArea))
-                for (int i = leaf.First; i < leaf.First + leaf.Count && i < leafFaces.Length; i++) skyFaces.Add(leafFaces[i]);
-        }
-        bool InSkybox(Vector p) => skyArea != null && leaves[LeafAt(p)].Area == skyArea;
+        internal bool InSkybox(Vector p) => skyArea != null && Leaves[LeafAt(p)].Area == skyArea;
+        public void Dispose() => Content.Dispose();
+    }
+
+    /// Writes <map>.obj, materials.mtl and textures into output: PNGs for Unity, or (`runtime`, a map the game builds
+    /// itself) .smtex textures in their own DXT blocks plus the map's light and sky. Returns a one-line summary.
+    internal static string Convert(string source, string output, IEnumerable<string> games, CancellationToken token, bool runtime = false)
+    {
+        using var bsp = new Bsp(source, games);
+        var b = bsp.B; var mapName = bsp.Name; var content = bsp.Content; var entities = bsp.Entities; var skyFaces = bsp.SkyFaces;
+        ArraySegment<byte> Lump(int i) => bsp.Lump(i);
+        T[] Items<T>(int lump, int size, Func<byte[], int, T> read) => bsp.Items(lump, size, read);
+        bool InSkybox(Vector p) => bsp.InSkybox(p);
+        var planes = Items(1, 20, (a, o) => (Normal: Vec(a, o), Dist: F32(a, o + 12)));
+        var verts = Items(3, 12, Vec);
+        var edges = Items(12, 4, (a, o) => (U16(a, o), U16(a, o + 2)));
+        var surfedges = Items(13, 4, I32);
+        var texinfo = Items(6, 72, (a, o) => (S: new[] { F32(a, o), F32(a, o + 4), F32(a, o + 8), F32(a, o + 12) }, T: new[] { F32(a, o + 16), F32(a, o + 20), F32(a, o + 24), F32(a, o + 28) }, Flags: I32(a, o + 64), Data: I32(a, o + 68)));
+        var texdata = Items(2, 32, (a, o) => (Name: I32(a, o + 12), Width: I32(a, o + 16), Height: I32(a, o + 20)));
+        var faces = Items(7, 56, (a, o) => (Plane: (int)U16(a, o), FirstEdge: I32(a, o + 4), Edges: (int)I16(a, o + 8), TexInfo: (int)I16(a, o + 10), Disp: (int)I16(a, o + 12)));
+        var models = Items(14, 48, (a, o) => (First: I32(a, o + 40), Count: I32(a, o + 44)));
+        var dispinfo = Items(26, 176, (a, o) => (Start: Vec(a, o), VertStart: I32(a, o + 12), Power: I32(a, o + 20)));
+        var dispverts = Items(33, 20, (a, o) => (Offset: Vec(a, o), Dist: F32(a, o + 12)));
+        var strings = Lump(43); var table = Items(44, 4, I32);
+        var names = table.Select(o => { int at = strings.Offset + o, end = Array.IndexOf(strings.Array!, (byte)0, at); return Encoding.Latin1.GetString(strings.Array!, at, Math.Max(0, end - at)); }).ToArray();
 
         Directory.CreateDirectory(Path.Combine(output, "textures"));
         var materials = new Dictionary<string, (string Mtl, bool Water, bool AlphaTest, bool Translucent, string? Texture)>(StringComparer.OrdinalIgnoreCase);
@@ -652,14 +716,18 @@ internal static class SourceMaps
                 texture = Regex.Replace(baseTexture, "[^a-z0-9_]+", "_");
                 // Short file names: the import's Unity project can't open paths over 260 characters.
                 if (texture.Length > 60) texture = texture[..48] + "_" + System.Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(texture)))[..8].ToLowerInvariant();
-                texture += ".png";
+                texture += runtime ? ".smtex" : ".png";
                 var file = Path.Combine(output, "textures", texture);
                 if (!File.Exists(file))
                     try
                     {
                         var raw = content.Read("materials/" + baseTexture + ".vtf") ?? throw new FileNotFoundException();
-                        var (w, h, rgba) = Vtf(raw);
-                        Png(file, w, h, rgba);
+                        if (runtime) MapTexture.Write(file, VtfImage(raw));
+                        else
+                        {
+                            var (w, h, rgba) = Vtf(raw);
+                            Png(file, w, h, rgba);
+                        }
                     }
                     catch (Exception ex) when (ex is IOException or InvalidDataException or IndexOutOfRangeException or ArgumentException) { texture = null; missingTextures++; }
             }
@@ -886,8 +954,98 @@ internal static class SourceMaps
                 }
             }
         }
+        // Light and sky are optional, as for Unity's imports: a failure there costs only them, never the map.
+        string lighting = "";
+        if (runtime)
+            try { lighting = " " + WriteLighting(bsp, output, "map", token); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { lighting = " The map's own light and sky could not be read; it keeps the game's: " + ex.Message; }
         return $"Source map '{mapName}': {brushFaces} faces, {displacements} displacements, {propCount} props ({breakables} breakable), "
-            + $"{collisionModels} with their collision models, {skyboxParts} 3D skybox parts left out, {materials.Count} materials, {missingTextures} textures missing, {missingModels} props without their model.";
+            + $"{collisionModels} with their collision models, {skyboxParts} 3D skybox parts left out, {materials.Count} materials, {missingTextures} textures missing, {missingModels} props without their model."
+            + lighting;
+    }
+
+    /// The map's own light and sky (SourceLighting) beside a converted map: <name>.source.json, and <name>.sky for a
+    /// skybox. Re-reads the map file: a map converted before this existed gets them without converting again.
+    internal static string WriteLighting(string source, string folder, string name, IEnumerable<string> games, CancellationToken token = default)
+    {
+        using var bsp = new Bsp(source, games);
+        return WriteLighting(bsp, folder, name, token);
+    }
+
+    static string WriteLighting(Bsp bsp, string folder, string name, CancellationToken token)
+    {
+        var settings = new SourceLighting.Settings();
+        Dictionary<string, string>? First(string kind) => bsp.Entities.FirstOrDefault(e => e.GetValueOrDefault("classname") == kind);
+        if (First("light_environment") is { } sun)
+        {
+            settings.SunDirection = SourceLighting.Aim(sun);
+            if (SourceLighting.LightValue(sun.GetValueOrDefault("_light")) is { } light) { settings.SunColor = light.Color; settings.SunBrightness = light.Brightness; }
+            if (SourceLighting.LightValue(sun.GetValueOrDefault("_ambient")) is { } ambient) { settings.AmbientColor = ambient.Color; settings.AmbientBrightness = ambient.Brightness; }
+        }
+        if (First("env_fog_controller") is { } fog && fog.GetValueOrDefault("fogenable") == "1"
+            && SourceLighting.LightValue((fog.GetValueOrDefault("fogcolor") ?? "") + " 0") is { } fogColour)
+        {
+            float Number(string key, float fallback) => float.TryParse(fog.GetValueOrDefault(key), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && float.IsFinite(v) ? v : fallback;
+            settings.FogColor = fogColour.Color;
+            settings.FogStart = Math.Max(0, Number("fogstart", 0)) * Scale;
+            settings.FogEnd = Math.Max(settings.FogStart + 1, Number("fogend", 10000) * Scale);
+            settings.FogMaxDensity = Math.Clamp(Number("fogmaxdensity", 1), 0, 1);
+        }
+        // The sky: the skyname's six images, or GMod's painted sky.
+        var skyName = (First("worldspawn")?.GetValueOrDefault("skyname") ?? "").Trim().ToLowerInvariant().Replace('\\', '/');
+        string sky = "none";
+        if (skyName == "painted") { SourceLighting.PaintedSky(settings, First("env_skypaint")); sky = "painted"; }
+        else if (skyName.Length > 0)
+        {
+            var faces = new (int Width, int Height, byte[] Rgba)?[6];
+            for (int axis = 0; axis < 6; axis++)
+            {
+                token.ThrowIfCancellationRequested();
+                var material = "skybox/" + skyName + SourceLighting.Suffixes[axis];
+                try
+                {
+                    var (_, values) = Material(bsp.Content, material);
+                    var texture = Regex.Replace(Str(values, "$basetexture").ToLowerInvariant().Replace('\\', '/').Trim('/'), "\\.(vtf|vmt)$", "");
+                    var raw = bsp.Content.Read("materials/" + (texture.Length > 0 ? texture : material) + ".vtf");
+                    if (raw != null) faces[axis] = SourceLighting.SkyImage(Vtf(raw), Str(values, "$basetexturetransform"));
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or IndexOutOfRangeException or ArgumentException) { }
+            }
+            // The four sides at least (some skies leave out the ground image).
+            if (faces.Take(4).All(f => f != null))
+            {
+                int n = Math.Clamp(faces.Where(f => f != null).Max(f => f!.Value.Width), 64, 1024);
+                var (cube, upper) = SourceLighting.Cube(faces, n);
+                SourceLighting.WriteCube(Path.Combine(folder, name + ".sky"), n, cube);
+                settings.Cubemap = name + ".sky"; settings.CubemapSize = n; settings.CubemapUpperLux = upper;
+                sky = $"'{skyName}' ({n} px)";
+            }
+            else if (First("env_skypaint") is { } paint) { SourceLighting.PaintedSky(settings, paint); sky = "painted"; }
+        }
+        // Lamps that are on (not "initially dark") and not the 3D skybox's: the brightest 512.
+        foreach (var lamp in bsp.Entities.Where(e => e.GetValueOrDefault("classname") is "light" or "light_spot"
+                         && (!int.TryParse(e.GetValueOrDefault("spawnflags"), out var flags) || (flags & 1) == 0))
+                     .Select(e => (Entity: e, Origin: Parse(e.GetValueOrDefault("origin", "0 0 0")), Value: SourceLighting.LightValue(e.GetValueOrDefault("_light"))))
+                     .Where(l => l.Value != null && l.Value.Value.Brightness > 0 && !bsp.InSkybox(l.Origin))
+                     .OrderByDescending(l => l.Value!.Value.Brightness).Take(512))
+        {
+            var origin = lamp.Origin;
+            var entry = new SourceLighting.Lamp
+            {
+                Position = SourceLighting.Position(origin.X, origin.Y, origin.Z),
+                Color = lamp.Value!.Value.Color, Brightness = lamp.Value.Value.Brightness,
+            };
+            if (lamp.Entity.GetValueOrDefault("classname") == "light_spot")
+            {
+                float Angle(string key, float fallback) => float.TryParse(lamp.Entity.GetValueOrDefault(key), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0 ? v : fallback;
+                entry.Direction = SourceLighting.Aim(lamp.Entity);
+                entry.Outer = Math.Clamp(2 * Angle("_cone", 45), 1, 179);
+                entry.Inner = Math.Clamp(2 * Angle("_inner_cone", 30), 0, entry.Outer);
+            }
+            settings.Lamps.Add(entry);
+        }
+        File.WriteAllText(Path.Combine(folder, name + ".source.json"), SourceLighting.Write(settings));
+        return $"Light and sky: {(settings.SunDirection != null ? "the map's sun" : "no sun of its own")}, sky {sky}, {(settings.FogColor != null ? "fog" : "no fog")}, {settings.Lamps.Count} lamps.";
     }
 
     /// A lump as stored, or unpacked when it is LZMA-compressed (later Source branches).
