@@ -1,7 +1,10 @@
-Map Framework 1.0.1 (Beta)
+Map Framework 1.1.0 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 For Sprocket 0.2.55.5 and 0.2.56 with the Sprocket Mod Loader (BepInEx 6 IL2CPP). Unity remains 6000.3.21f1.
+New in 1.1.0: OBJ and Garry's Mod maps don't need Unity. Without it (or when it fails), the game builds them itself
+and checks them once in the main menu (Import > Build maps in the game: Automatic, Always or Never). Garry's Mod
+maps bring their own sun, skybox or painted sky, fog and lamps (Lighting > GMod map light and sky).
 New in 1.0.1: Unity 6000.3.21f1 is found wherever Unity Hub or Unity's installer put it. Before, only Unity Hub's
 default folder and <drive>:\Unity were searched, so an install anywhere else read as "not installed".
 New since 0.4.1 (details in CHANGELOG.md and docs/Making-Custom-Maps.html in the repository):
@@ -25,8 +28,9 @@ BepInEx\plugins\SprocketMaps.
 When updating, remove any older extra copy of SprocketMaps.dll so only one copy is installed.
 
 Automatic import: put OBJ/FBX models and their textures in a subfolder of CustomMaps, or put ZIP, 7z and
-.unitypackage files directly in CustomMaps. Nested ZIP/7z archives are unpacked automatically. Unity 6000.3.21f1
-must be installed and licensed; Map Framework converts a private copy in the background with no manual export.
+.unitypackage files directly in CustomMaps. Nested ZIP/7z archives are unpacked automatically. FBX models and Unity
+packages need Unity 6000.3.21f1 installed and licensed; Map Framework converts a private copy in the background with
+no manual export. OBJ and Garry's Mod maps use Unity when it works and are built by the game otherwise.
 It finds Unity wherever Unity Hub or Unity's installer put it. Keep the included SharpCompress.dll beside
 SprocketMaps.dll. A Unity copy without an installer and an additional map source folder can be set under Import in
 BepInEx/config/local.sprocket.maps.cfg.

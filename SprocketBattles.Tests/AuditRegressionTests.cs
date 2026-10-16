@@ -61,7 +61,25 @@ internal static class AuditRegressionTests
             new Eras.Era("Other", new DateTime(1920, 1, 1), MediumMass: 10000) }, Array.Empty<(string, int)>())[1] > 0,
             "a zero mass in a custom era never divides by zero");
         FileAndShareChecks();
+        ConfigNames();
         Console.WriteLine("AUDIT_REGRESSION_TESTS_OK");
+    }
+
+    // BepInEx refuses these characters in setting sections and names, and a plugin whose Bind throws doesn't load at all
+    // (Map Framework 1.1.0's "Garry's Mod maps' own light and sky" took away every custom map, 2026-10-17).
+    static void ConfigNames()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !Directory.Exists(Path.Combine(root.FullName, "SprocketMaps"))) root = root.Parent;
+        Check(root != null, "the plugin sources are found from the test build");
+        int names = 0;
+        foreach (var file in new[] { "SprocketMaps", "SprocketBattles" }.SelectMany(d => Directory.GetFiles(Path.Combine(root!.FullName, d), "*.cs", SearchOption.AllDirectories)))
+            foreach (System.Text.RegularExpressions.Match bind in System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file),
+                         @"\.Bind(?:<[^>]*>)?\(\s*""((?:[^""\\]|\\.)*)""\s*,\s*""((?:[^""\\]|\\.)*)"""))
+                for (int g = 1; g <= 2; g++, names++)
+                    Check(bind.Groups[g].Value.IndexOfAny(new[] { '=', '\n', '\t', '\\', '"', '\'', '[', ']' }) < 0,
+                        $"{Path.GetFileName(file)}: the setting name '{bind.Groups[g].Value}' has a character BepInEx refuses");
+        Check(names >= 16, $"every setting name is checked ({names} found)");
     }
 
     static GauntletSaveData Save(int round, int completed, int committed) => new() {

@@ -28,6 +28,7 @@ if (args.Length == 3 && args[0] == "--check-data")
 }
 AuditRegressionTests.Run();
 MapImportTests.Run();
+RuntimeMapTests.Run();
 MapImportDiscoveryTests.Run();
 ReplayTests.Run();
 ReplayMediaTests.Run();

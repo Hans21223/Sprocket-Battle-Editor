@@ -40,6 +40,10 @@
     <Compile Include="..\SprocketMaps\MapImportConversion.cs" Link="MapImportConversion.cs" />
     <Compile Include="..\SprocketMaps\MapImportDiscovery.cs" Link="MapImportDiscovery.cs" />
     <Compile Include="..\SprocketMaps\SourceMaps.cs" Link="SourceMaps.cs" />
+    <Compile Include="..\SprocketMaps\SourceLighting.cs" Link="SourceLighting.cs" />
+    <Compile Include="..\SprocketMaps\MapTexture.cs" Link="MapTexture.cs" />
+    <Compile Include="..\SprocketMaps\ObjModel.cs" Link="ObjModel.cs" />
+    <Compile Include="..\SprocketMaps\RuntimeMapFiles.cs" Link="RuntimeMapFiles.cs" />
     <EmbeddedResource Include="..\SprocketMaps\Import\SprocketAutoMapExport.cs.txt" LogicalName="SprocketMaps.AutoMapExporter" WithCulture="false" />
     <PackageReference Include="SharpCompress" Version="0.50.4" />
   </ItemGroup>

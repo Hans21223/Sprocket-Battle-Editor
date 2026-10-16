@@ -10,6 +10,10 @@ internal static class MapImportConversion
     internal sealed record Result(string Source, string Fingerprint, string Bundle, int Capacity);
     internal sealed class EditorUnavailableException : InvalidOperationException
     { internal EditorUnavailableException(string message) : base(message) { } }
+    /// Unity failed for a reason that isn't the map's (its installation, licence, memory, time): the game can build an
+    /// OBJ or Garry's Mod map itself instead.
+    internal sealed class UnityProblemException : InvalidOperationException
+    { internal UnityProblemException(string message, Exception? inner = null) : base(message, inner) { } }
     internal static string? FindEditor(string configured)
     {
         // Players write the path in quotes, which BepInEx keeps as part of the value, or give the editor's folder.
@@ -134,6 +138,7 @@ internal static class MapImportConversion
         if (Ready(Path.Combine(output,"ready.json"),bundle,out var capacity,token))
         {
             PublishBundlePath(Path.Combine(output,"ready.json"),bundle);
+            Lighting(source,output,name,detail,token); // a Garry's Mod map imported before it had its light and sky
             progress("Using the previously imported map"); return new(source,fingerprint,bundle,capacity);
         }
         // A session that quit mid-import leaves its whole Unity project behind (2.5 GB in one folder, 2026-10-11).
@@ -185,17 +190,31 @@ internal static class MapImportConversion
                 {
                     var status = Path.Combine(attempt,"status.txt");
                     string value = "";
-                    try { if (File.Exists(status) && new FileInfo(status).Length < 1024) value = File.ReadAllText(status); } catch (IOException) { }
+                    // Read without blocking Unity's next write: File.ReadAllText refuses writers while it reads, and
+                    // Unity's script stopped with "Sharing violation on path ...status.txt" (a player's import, 2026-10-17).
+                    try
+                    {
+                        if (File.Exists(status) && new FileInfo(status).Length < 1024)
+                        {
+                            using var reader = new StreamReader(new FileStream(status, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+                            value = reader.ReadToEnd();
+                        }
+                    }
+                    catch (IOException) { }
                     if (value.Length is > 0 and < 160 && value != last) { progress(value); last = value; }
                     await Task.WhenAny(exited,Task.Delay(1000,timeout.Token));
                 }
                 await exited;
+                TidyLog(log);
             }
             catch (OperationCanceledException ex) when (!token.IsCancellationRequested)
-            { throw new InvalidOperationException("Map conversion exceeded its 15-minute limit. Details: " + log,ex); }
+            { throw new UnityProblemException("Map conversion exceeded its 15-minute limit. Details: " + log,ex); }
             var attemptBundle = Path.Combine(attempt,name + ".bundle");
             if (process.ExitCode != 0 || !Ready(Path.Combine(attempt,"ready.json"),attemptBundle,out capacity,token))
-                throw new InvalidOperationException(FailureReason(attempt) + " Details: " + log);
+            {
+                var (reason, unity) = FailureReason(attempt, log);
+                throw unity ? new UnityProblemException(reason + " Details: " + log) : new InvalidOperationException(reason + " Details: " + log);
+            }
             if (MapImportSource.Fingerprint(source,token) != fingerprint)
                 throw new InvalidOperationException("The map changed during conversion. Save the map files and try again.");
             token.ThrowIfCancellationRequested();
@@ -203,6 +222,7 @@ internal static class MapImportConversion
             PublishBundlePath(Path.Combine(attempt,"custom-map-validation.json"),bundle);
             // Publish only fully checked output while holding exclusive cache ownership.
             await RemoveOwned(folder,output,"Output",true);
+            Lighting(source,attempt,name,detail,token);
             Directory.Move(attempt,output);
             return new(source,fingerprint,bundle,capacity);
         }
@@ -284,19 +304,74 @@ internal static class MapImportConversion
         }
         if (required) throw new IOException("The previous map cache could not be replaced.",last);
     }
-    static string FailureReason(string attempt)
+    /// A Garry's Mod map's own light and sky beside its bundle (<name>.source.json, <name>.sky). Optional: a failure
+    /// costs only those, never the map.
+    static void Lighting(string source, string folder, string name, Action<string>? detail, CancellationToken token)
     {
-        var fallback = "The map could not be converted. Check its ground, textures and tank clearance.";
+        if (!SourceMaps.Is(source) || File.Exists(Path.Combine(folder, name + ".source.json"))) return;
+        try { detail?.Invoke(SourceMaps.WriteLighting(source, folder, name, SourceMaps.GameFolders(), token)); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        { detail?.Invoke("The map's own light and sky could not be read; it keeps the game's: " + ex.Message); }
+    }
+
+    /// Why Unity failed, and whether it was Unity's own trouble rather than the map's.
+    static (string Reason, bool Unity) FailureReason(string attempt, string log)
+    {
+        string? reason = null;
         var validation = Path.Combine(attempt,"custom-map-validation.json");
         try
         {
-            if (!File.Exists(validation) || new FileInfo(validation).Length > 1024*1024) return fallback;
-            using var document = JsonDocument.Parse(File.ReadAllText(validation));
-            if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("error",out var message) && message.ValueKind == JsonValueKind.String)
-            { var reason = message.GetString()?.Split('\n')[0].Trim(); if (!string.IsNullOrEmpty(reason)) return reason; }
+            if (File.Exists(validation) && new FileInfo(validation).Length <= 1024*1024)
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(validation));
+                if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("error",out var message) && message.ValueKind == JsonValueKind.String)
+                    reason = message.GetString()?.Split('\n')[0].Trim();
+            }
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { }
-        return fallback;
+        // Without the converter's own reason, Unity stopped before checking the map: its log says why (players' imports, 2026-10-14).
+        string tail = "";
+        try
+        {
+            using var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            stream.Seek(Math.Max(0, stream.Length - 256 * 1024), SeekOrigin.Begin);
+            tail = new StreamReader(stream).ReadToEnd();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        if (KnownCause((reason ?? "") + "\n" + tail) is { } known) return (known, true);
+        return string.IsNullOrEmpty(reason) ? ("Unity stopped before it could check the map; its log (below) says why.", true) : (reason!, false);
+    }
+
+    /// Players post this log in public: Unity writes the PC's network address, computer name and Windows user name in it.
+    static void TidyLog(string log)
+    {
+        try { if (File.Exists(log)) File.WriteAllText(log, Tidy(File.ReadAllText(log))); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+    internal static string Tidy(string text)
+    {
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[IP\] [0-9a-fA-F.:]+", "[IP] (removed)");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"WindowsEditor\((\d+),[^)]*\)", "WindowsEditor($1,(removed))");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"LicenseClient-[^"" \r\n]+", "LicenseClient-(removed)");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"([\\/]Users[\\/])[^\\/\r\n""]+", "$1(removed)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var machine = Environment.MachineName;
+        // As a whole word: a PC called "MAIN" must not turn "MainThread" into "(removed)Thread".
+        if (machine.Length >= 4) text = System.Text.RegularExpressions.Regex.Replace(text, $@"\b{System.Text.RegularExpressions.Regex.Escape(machine)}\b", "(removed)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return text;
+    }
+
+    /// Unity failures players can fix themselves, by what Unity or the converter wrote.
+    internal static string? KnownCause(string text)
+    {
+        if (text.Contains("Package Manager local server", StringComparison.Ordinal) || text.Contains("Cannot start server process", StringComparison.Ordinal))
+            return "Unity " + MapImportSource.UnityVersion + " is incompletely installed (its Package Manager is missing). Uninstall it in Unity Hub and install it again.";
+        if (text.Contains("No valid Unity Editor license", StringComparison.OrdinalIgnoreCase) || text.Contains("license is not active", StringComparison.OrdinalIgnoreCase))
+            return "Unity has no licence: open Unity Hub, sign in, and check that Preferences > Licenses shows one (the free Personal licence works).";
+        if (text.Contains("Could not allocate memory", StringComparison.Ordinal) || text.Contains("Out of memory", StringComparison.OrdinalIgnoreCase))
+            return "Unity ran out of memory converting this map. Close other programs and restart Sprocket to try again.";
+        if (text.Contains("Sharing violation", StringComparison.Ordinal))
+            return "Another program had one of the import's files open. Restart Sprocket to try again.";
+        return null;
     }
     internal static bool Ready(string report, string bundle, out int capacity, CancellationToken token = default)
     {

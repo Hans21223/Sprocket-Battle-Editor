@@ -146,7 +146,9 @@ internal static class MapImportSource
             }
         }
     }
-    internal static void Stage(string source, string input, CancellationToken token = default, Action<string>? log = null)
+    /// `runtime`: for a map the game builds itself, so a Garry's Mod map keeps its textures' own DXT blocks and brings
+    /// its light and sky.
+    internal static void Stage(string source, string input, CancellationToken token = default, Action<string>? log = null, bool runtime = false)
     {
         var files = SourceFiles(source, token);
         if (Directory.Exists(input) && ((File.GetAttributes(input) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(input).Any()))
@@ -155,7 +157,7 @@ internal static class MapImportSource
         {
             // A Garry's Mod map becomes an OBJ with its textures, which Unity then converts like any other.
             Directory.CreateDirectory(input);
-            log?.Invoke(SourceMaps.Convert(source, input, SourceMaps.GameFolders(), token));
+            log?.Invoke(SourceMaps.Convert(source, input, SourceMaps.GameFolders(), token, runtime));
             if (Files(input, token).Sum(f => new FileInfo(f).Length) > MaxBytes) throw new InvalidOperationException("The converted map exceeds the import size limit.");
             return;
         }
