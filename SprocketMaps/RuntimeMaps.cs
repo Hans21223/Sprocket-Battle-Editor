@@ -254,7 +254,7 @@ internal sealed class RuntimeMapBuild
 /// Importing a map the game builds itself: its files converted on a worker (a Garry's Mod map to an OBJ with its own
 /// DXT textures, light and sky; an OBJ, folder or archive copied), then checked in the game as Unity's import checks
 /// one: its collision built well out of the way (10 km up), tank navigation, and two clear, connected starting areas
-/// at 16, 8, 4, 2 or 1 tanks a side. The result is kept in map.json, so later starts skip both.
+/// at 16, 8, 4, 2 or 1 tanks a side, or else open ground far apart. The result is kept in map.json, so later starts skip both.
 internal sealed class RuntimeMapImport
 {
     /// Maps the game can build: Garry's Mod maps and OBJ (alone, or in a folder or ZIP/7z). FBX and Unity packages need Unity.
@@ -379,18 +379,15 @@ internal sealed class RuntimeMapImport
                 try
                 {
                     var (_, _, a, b) = CustomMapBridge.FindStarts(build.Root!, bounds, (ushort)count, manifest.Name);
-                    manifest.Capacity = count;
-                    manifest.StartA = new[] { a.x - CheckOffset.x, a.y - CheckOffset.y, a.z - CheckOffset.z };
-                    manifest.StartB = new[] { b.x - CheckOffset.x, b.y - CheckOffset.y, b.z - CheckOffset.z };
-                    File.WriteAllText(Path.Combine(folder, "map.json"), RuntimeMapFiles.Write(manifest));
-                    Plugin.ModLog.LogInfo($"In-game map check passed: '{manifest.DisplayName}', {count} tanks a side, starts {Vector3.Distance(a, b):0} m apart");
-                    Result = manifest;
-                    Cleanup();
+                    Accept(count, a, b, $"In-game map check passed: '{manifest.DisplayName}', starts clear for {count} tanks a side, {Vector3.Distance(a, b):0} m apart");
                 }
                 catch (InvalidOperationException ex) { lastReason = ex.Message; }
                 return;
             }
-            throw new InvalidDataException("No connected, clear tank formation pair exists at 16, 8, 4, 2 or 1 tanks a side: " + lastReason);
+            // No clear, connected starting areas: the map is added anyway, starting on open ground (the Battle Editor places its own tanks).
+            var (openA, openB) = CustomMapBridge.OpenGround(build.Root!, bounds);
+            Accept(CustomMapBridge.TanksPerSide, openA, openB, $"In-game map check: no clear, connected starting areas on '{manifest.DisplayName}' ({lastReason}); " +
+                $"battles start on open ground {Vector3.Distance(openA, openB):0} m apart");
         }
         catch (Exception ex)
         {
@@ -401,6 +398,18 @@ internal sealed class RuntimeMapImport
                 catch (Exception write) when (write is IOException or UnauthorizedAccessException) { }
             Cleanup();
         }
+    }
+
+    /// The check's result kept in map.json: the starting areas (map space) and how many tanks they were checked for.
+    void Accept(int count, Vector3 a, Vector3 b, string log)
+    {
+        manifest!.Capacity = count;
+        manifest.StartA = new[] { a.x - CheckOffset.x, a.y - CheckOffset.y, a.z - CheckOffset.z };
+        manifest.StartB = new[] { b.x - CheckOffset.x, b.y - CheckOffset.y, b.z - CheckOffset.z };
+        File.WriteAllText(Path.Combine(folder, "map.json"), RuntimeMapFiles.Write(manifest));
+        Plugin.ModLog.LogInfo(log);
+        Result = manifest;
+        Cleanup();
     }
 
     internal void Cancel()

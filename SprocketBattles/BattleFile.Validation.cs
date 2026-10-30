@@ -15,6 +15,7 @@ public sealed partial class BattleFile
         const string invalid = "The battle file is invalid: ";
         if (Name == null || Map == null || Description == null || Objective == null || Failure == null || Clouds == null || Fog == null)
             return invalid + "a text field is null.";
+        if (BattleTimeOfDay.Check(TimeOfDay) is { } timeError) return invalid + timeError;
         if (!Items(Units)) return invalid + "the tank list contains a null entry.";
         if (!Unique(Units.Select(u => u.Id))) return invalid + "two tanks have the same ID.";
         foreach (var u in Units)

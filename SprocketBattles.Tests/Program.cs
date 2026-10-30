@@ -5,6 +5,11 @@ if (args.Length == 1 && args[0] == "--test-map-import")
     MapImportTests.Run();
     return;
 }
+if (args.Length == 1 && args[0] == "--time-of-day-only")
+{
+    TimeOfDayTests.Run();
+    return;
+}
 if (args.Length == 2 && args[0] == "--verify-plugin")
 {
     var assembly = System.Reflection.Assembly.LoadFile(Path.GetFullPath(args[1]));
@@ -34,6 +39,7 @@ ReplayTests.Run();
 ReplayMediaTests.Run();
 CameraEditingTests.Run();
 BattleTests.Run();
+TimeOfDayTests.Run();
 DriveSimTests.Run();
 SharingTests.Run();
 SpawnClearanceTests.Run();

@@ -113,6 +113,7 @@ public sealed partial class BattleEditor : MonoBehaviour
         modTicks = 0;
         modClock.Restart();
         Guard.Run("Battle editor", Tick);
+        Guard.Run("Time of day", TickBattleLighting);
         modTicks += modClock.ElapsedTicks;
     }
 
@@ -1068,10 +1069,11 @@ public sealed partial class BattleEditor : MonoBehaviour
 
     // The panels: the editor's own (left), the selected tank's or the tab's (right). Clicks on them don't reach the map.
     const float Row = 26, Pad = 8;
+    const int TankListHeaderRows = 7;
     int listTop;
-    static int ListRows => Math.Clamp((int)((Screen.height - 56 - 11 * Row - 40) / Row), 4, 16);
-    static Rect MainPanel => new(16, 56, 480, (9 + ListRows) * Row + 2 * Pad);
-    static Rect ListArea => new(16 + Pad, 56 + Pad + 6 * Row, 480 - 2 * Pad, ListRows * Row);
+    static int ListRows => Math.Clamp((int)((Screen.height - 56 - (TankListHeaderRows + 5) * Row - 40) / Row), 4, 16);
+    static Rect MainPanel => new(16, 56, 480, (TankListHeaderRows + 3 + ListRows) * Row + 2 * Pad);
+    static Rect ListArea => new(16 + Pad, 56 + Pad + TankListHeaderRows * Row, 480 - 2 * Pad, ListRows * Row);
     static Rect SelectedPanel => new(Screen.width - 16 - 360, 56, 360, 15 * Row + 2 * Pad);
     static readonly Color PickColour = new(0.2f, 0.85f, 0.95f);
 
@@ -1199,6 +1201,16 @@ public sealed partial class BattleEditor : MonoBehaviour
                 : "Team battle: tanks on the same team are allies. Save keeps this mode.");
             Rebuild();
         });
+        y += Row;
+        GUI.Label(Line(0, 90), "Time of day:");
+        void ChangeTime(int direction)
+        {
+            file.TimeOfDay = BattleTimeOfDay.Next(file.TimeOfDay, direction);
+            Say($"Time of day: {file.TimeOfDay}. Save keeps this setting.");
+        }
+        Button(Line(90, 26), "<", () => ChangeTime(-1));
+        Button(Line(120, w - 150), file.TimeOfDay, () => ChangeTime(1));
+        Button(Line(w - 26, 26), ">", () => ChangeTime(1));
         y += Row;
         GUI.Label(Line(0, 90), "Next tank:");
         Toggle(Line(90, 150), team == 0, file.FreeForAll ? " Blue spawn group" : " Team 1 (blue)", () => team = 0);

@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="..\SprocketBattles\BattleFile.cs" Link="BattleFile.cs" />
     <Compile Include="..\SprocketBattles\BattleFile.Validation.cs" Link="BattleFile.Validation.cs" />
+    <Compile Include="..\SprocketBattles\BattleTimeOfDay.cs" Link="BattleTimeOfDay.cs" />
     <Compile Include="..\SprocketBattles\SavedFiles.cs" Link="SavedFiles.cs" />
     <Compile Include="..\SprocketBattles\ReplayData.cs" Link="ReplayData.cs" />
     <Compile Include="..\SprocketBattles\ReplayMedia.cs" Link="ReplayMedia.cs" />

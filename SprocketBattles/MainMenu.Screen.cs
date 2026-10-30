@@ -259,8 +259,15 @@ internal static partial class MainMenu
                     Fill(); ShowBattle(index);
                 }, () => ShowBattle(index), index == picked));
                 if (actionsFor != index) continue;
+                void TimeSetting() => wanted.Add(("time of day", $"      Time of day: {b.TimeOfDay}", () =>
+                {
+                    if (b.Locked) { Tell("Time of day is set by this battle's author."); return; }
+                    b.TimeOfDay = BattleTimeOfDay.Next(b.TimeOfDay);
+                    Save(path, b); shownKey = null; Fill(); ShowBattle(index);
+                }, () => ShowBattle(index), false));
                 if (menuSection == MenuSection.Playing)
                 {
+                    TimeSetting();
                     wanted.Add(("choose tanks", "      Choose tanks & play", () => ChooseTanksAndPlay(b), () => ShowBattle(index), false));
                     wanted.Add(("play authored", "      Play with battle tanks", () => PlayAuthoredTanks(b), () => ShowBattle(index), false));
                     continue;
@@ -289,6 +296,7 @@ internal static partial class MainMenu
                 Text("failure", "Fails if", b.Failure, "(from its rules)", v => b.Failure = v);
                 wanted.Add(("clouds", $"      Clouds: {b.Clouds}", () => { b.Clouds = Next(CloudNames, b.Clouds); Save(path, b); Fill(); }, () => ShowBattle(index), false));
                 wanted.Add(("fog", $"      Fog: {b.Fog}", () => { b.Fog = Next(FogNames, b.Fog); Save(path, b); Fill(); }, () => ShowBattle(index), false));
+                TimeSetting();
                 wanted.Add(("duplicate", "      Duplicate", () => Duplicate(b), () => ShowBattle(index), false));
                 wanted.Add(("share", "      Share", () => Share(b, locked: false), () => ShowBattle(index), false));
                 wanted.Add(("share locked", "      Share locked", () => Share(b, locked: true), () => ShowBattle(index), false));
@@ -395,6 +403,8 @@ internal static partial class MainMenu
             var mapNames = MapList().Select(m => m.Map).ToList();
             wanted.Add(("quick map", "      Map: " + (quickMap < 0 || quickMap >= mapNames.Count ? "any" : mapNames[quickMap]),
                 () => { quickMap = quickMap + 1 >= mapNames.Count ? -1 : quickMap + 1; shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
+            wanted.Add(("quick time of day", $"      Time of day: {quickTimeOfDay}",
+                () => { quickTimeOfDay = BattleTimeOfDay.Next(quickTimeOfDay); RefreshQuick(); }, ShowQuick, false));
             wanted.Add(("quick size", quickFreeForAll ? $"      Total tanks: {2 * QuickSizes[quickSize]}" : $"      Tanks a side: {QuickSizes[quickSize]}", () => { quickSize = (quickSize + 1) % (quickFreeForAll ? 4 : QuickSizes.Length); shownKey = null; Fill(); ShowQuick(); }, ShowQuick, false));
             AddFactionSetting(wanted, "quick player faction", "Player faction", quickPlayerPool, quickPlayerFaction,
                 (pool, faction) => { quickPlayerPool = pool; quickPlayerFaction = faction; }, RefreshQuick, ShowQuick);
@@ -416,6 +426,8 @@ internal static partial class MainMenu
             var mapNames = MapList().Select(m => m.Map).ToList();
             wanted.Add(("gauntlet map", "      Map: " + (gauntletMap < 0 || gauntletMap >= mapNames.Count ? "random" : mapNames[gauntletMap]),
                 () => { gauntletMap = gauntletMap + 1 >= mapNames.Count ? -1 : gauntletMap + 1; RefreshGauntlet(); }, ShowGauntlet, false));
+            wanted.Add(("gauntlet time of day", $"      Time of day: {gauntletTimeOfDay}",
+                () => { gauntletTimeOfDay = BattleTimeOfDay.Next(gauntletTimeOfDay); RefreshGauntlet(); }, ShowGauntlet, false));
             AddNumberSetting(wanted, "gauntlet budget", "Starting funds", gauntletBudget, 1000, 10000000,
                 v => gauntletBudget = v, RefreshGauntlet, ShowGauntlet);
             AddNumberSetting(wanted, "gauntlet rounds", "Rounds", gauntletRounds, 2, 30,
@@ -435,6 +447,7 @@ internal static partial class MainMenu
     static readonly FreeForAllSpawnSettings quickSpawns = new();
     static int quickMap = -1, quickSize = 2, quickPlayerPool, quickEnemyPool;
     static string? quickPlayerFaction, quickEnemyFaction;
+    static string quickTimeOfDay = BattleTimeOfDay.MapDefault;
     static readonly int[] QuickSizes = { 1, 2, 3, 4, 6, 8 };
     static readonly string[] QuickPools = { "yours", "the game's", "yours and the game's" };
     static readonly System.Random dice = new();
@@ -461,11 +474,12 @@ internal static partial class MainMenu
     {
         var maps = MapList();
         bool chosen = quickMap >= 0 && quickMap < maps.Count;
-        Show($"quick {quickMap} {quickSize} {quickPlayerPool} {quickPlayerFaction} {quickEnemyPool} {quickEnemyFaction} {quickEra} {quickFreeForAll} {quickSpawns.Randomize} {quickSpawns.MinSpacing} {quickSpawns.MaxSpacing}", "Quick battle",
+        Show($"quick {quickMap} {quickSize} {quickPlayerPool} {quickPlayerFaction} {quickEnemyPool} {quickEnemyFaction} {quickEra} {quickTimeOfDay} {quickFreeForAll} {quickSpawns.Randomize} {quickSpawns.MinSpacing} {quickSpawns.MaxSpacing}", "Quick battle",
              (quickFreeForAll ? $"Free for all: {2 * QuickSizes[quickSize]} tanks, every tank fights every other tank (up to 8 total). " : $"Team battle: {QuickSizes[quickSize]} vs {QuickSizes[quickSize]} tanks. ") +
              $"Player designs: {QuickDesigns(0).Count} from {FactionSelectionLabel(quickPlayerPool, quickPlayerFaction)}. " +
              $"Enemy designs: {QuickDesigns(1).Count} from {FactionSelectionLabel(quickEnemyPool, quickEnemyFaction)}. " +
              (QuickEra() is { } e ? $"Era: {e}. " : "") +
+             $"Time of day: {quickTimeOfDay}. " +
               $"Designs are picked at random on {(chosen ? maps[quickMap].Map : "a map picked at random")}. The map may reduce the tank count. " +
               SpawnDescription(quickSpawns) + " Nothing is saved.",
               new[] { "Destroy every enemy tank" }, new[] { "Lose all vehicles" }, new[] { "QUICK BATTLE" },
@@ -490,14 +504,14 @@ internal static partial class MainMenu
         if (quickFreeForAll) size = Math.Min(size, 4);
         var b = new BattleFile
         {
-            Name = quickFreeForAll ? "Quick free for all" : "Quick battle", Map = map.Map, FreeForAll = quickFreeForAll,
+            Name = quickFreeForAll ? "Quick free for all" : "Quick battle", Map = map.Map, FreeForAll = quickFreeForAll, TimeOfDay = quickTimeOfDay,
             FreeForAllSpawns = quickSpawns.Randomize ? new FreeForAllSpawnSettings
             { Randomize = quickSpawns.Randomize, MinSpacing = quickSpawns.MinSpacing, MaxSpacing = quickSpawns.MaxSpacing } : null,
         };
         for (int team = 0; team < 2; team++)
             for (int i = 0; i < size; i++)
                 b.Units.Add(new BattleUnit { Id = b.NewId(), Team = team, Blueprint = designs[team][dice.Next(designs[team].Count)].Path, AtSpawn = true });
-        Trace.Write($"menu: quick battle on {map.Map}, player faction={FactionSelectionLabel(quickPlayerPool, quickPlayerFaction)}, enemy faction={FactionSelectionLabel(quickEnemyPool, quickEnemyFaction)}, era={QuickEra() ?? "any"}: {string.Join(", ", b.Units.Select(u => $"{u.Id} {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}"))}");
+        Trace.Write($"menu: quick battle on {map.Map}, time of day={quickTimeOfDay}, player faction={FactionSelectionLabel(quickPlayerPool, quickPlayerFaction)}, enemy faction={FactionSelectionLabel(quickEnemyPool, quickEnemyFaction)}, era={QuickEra() ?? "any"}: {string.Join(", ", b.Units.Select(u => $"{u.Id} {System.IO.Path.GetFileNameWithoutExtension(u.Blueprint)}"))}");
         Start(b, play: true);
     }
 
@@ -506,6 +520,7 @@ internal static partial class MainMenu
     static bool gauntletOpen;
     static int gauntletMap = -1, gauntletBudget = 100000, gauntletRounds = 10, gauntletPool = 1;
     static string? gauntletEnemyFaction;
+    static string gauntletTimeOfDay = BattleTimeOfDay.MapDefault;
     static readonly FreeForAllSpawnSettings gauntletSpawns = new() { Randomize = false, MinSpacing = 80, MaxSpacing = 200 };
     static void RefreshGauntlet() { shownKey = null; Fill(); ShowGauntlet(); }
 
@@ -521,7 +536,9 @@ internal static partial class MainMenu
             : $"Start with {gauntletBudget:N0} funds. Fight through {gauntletRounds} rounds against enemy waves that progress chronologically across eras.\n" +
               $"Repair and refit between rounds with earned rewards. Advance your tank's era for a fee." +
               (gauntletSpawns.Randomize ? $"\n{SpawnDescription(gauntletSpawns)}" : "");
-        Show($"gauntlet {gauntletMap} {gauntletBudget} {gauntletRounds} {gauntletPool} {gauntletEnemyFaction} {hasSave} {gauntletSpawns.Randomize} {gauntletSpawns.MinSpacing} {gauntletSpawns.MaxSpacing}", "Gauntlet",
+        desc += $"\nNew run time of day: {gauntletTimeOfDay}.";
+        if (hasSave && save != null) desc += $" Saved run time of day: {save.Settings.TimeOfDay}.";
+        Show($"gauntlet {gauntletMap} {gauntletBudget} {gauntletRounds} {gauntletPool} {gauntletEnemyFaction} {hasSave} {gauntletTimeOfDay} {save?.Settings.TimeOfDay} {gauntletSpawns.Randomize} {gauntletSpawns.MinSpacing} {gauntletSpawns.MaxSpacing}", "Gauntlet",
              desc,
              new[] { $"Complete {gauntletRounds} rounds" }, new[] { "Lose your tank" }, new[] { "GAUNTLET" },
              chosen ? SplashPath(maps[gauntletMap].Map, scenario: true) : maps.FirstOrDefault().ScenarioSplash ?? "");
@@ -534,10 +551,10 @@ internal static partial class MainMenu
         if (RandomDesigns(gauntletPool, null, gauntletEnemyFaction).Count == 0)
         { Tell($"No usable enemy tanks match {FactionSelectionLabel(gauntletPool, gauntletEnemyFaction)}. Choose another enemy faction."); return; }
         var map = gauntletMap >= 0 && gauntletMap < maps.Count ? maps[gauntletMap] : maps[dice.Next(maps.Count)];
-        Trace.Write($"menu: Gauntlet on {map.Map}, enemy faction={FactionSelectionLabel(gauntletPool, gauntletEnemyFaction)}");
+        Trace.Write($"menu: Gauntlet on {map.Map}, time of day={gauntletTimeOfDay}, enemy faction={FactionSelectionLabel(gauntletPool, gauntletEnemyFaction)}");
         Gauntlet.Start(new GauntletSettings
         {
-            Budget = gauntletBudget, Rounds = gauntletRounds, Map = map.Map, Pool = QuickPools[gauntletPool], EnemyFaction = gauntletEnemyFaction,
+            Budget = gauntletBudget, Rounds = gauntletRounds, Map = map.Map, Pool = QuickPools[gauntletPool], EnemyFaction = gauntletEnemyFaction, TimeOfDay = gauntletTimeOfDay,
             Spawns = gauntletSpawns.Randomize ? new FreeForAllSpawnSettings { Randomize = true, MinSpacing = gauntletSpawns.MinSpacing, MaxSpacing = gauntletSpawns.MaxSpacing } : null
         });
     }
@@ -725,6 +742,7 @@ internal static partial class MainMenu
         var parts = new List<string>();
         if (b.Description.Length > 0) parts.Add(b.Description);
         parts.Add(b.FreeForAll ? $"Free for all: {b.Units.Count} tanks on {b.Map}; every tank fights every other tank." : $"{blue} vs {red} tanks on {b.Map}.");
+        if (b.TimeOfDay != BattleTimeOfDay.MapDefault) parts.Add($"Time of day: {b.TimeOfDay}.");
         if (b.FreeForAll) parts.Add(SpawnDescription(b.FreeForAllSpawns ?? new FreeForAllSpawnSettings()));
         if (reserves > 0) parts.Add($"{reserves} held in reserve.");
         if (b.Slots.Count is var slots and > 0)

@@ -43,8 +43,10 @@ internal static class RuntimeMapFiles
         && manifest.StartB is { Length: 3 } && manifest.Name.Length > 0
         && File.Exists(Path.Combine(Path.GetDirectoryName(file)!, "Input", manifest.Model)) ? manifest : null;
 
-    /// Why this exact source failed the check before, or null.
-    internal static string? Failed(string file, string fingerprint) => Read(file) is { Version: 1, Failure: { } why } manifest && manifest.Fingerprint == fingerprint ? why : null;
+    /// Why this exact source failed the check before, or null. A map that failed only for lacking starting areas (Map
+    /// Framework 1.1.0 refused those) is checked again: such maps now start on open ground.
+    internal static string? Failed(string file, string fingerprint) => Read(file) is { Version: 1, Failure: { } why } manifest && manifest.Fingerprint == fingerprint
+        && !why.StartsWith("No connected, clear tank formation pair", StringComparison.Ordinal) ? why : null;
 
     /// The map's model among its converted files: the chosen OBJ, or (a folder or archive) the largest one.
     internal static string? Model(string input, string? chosen)

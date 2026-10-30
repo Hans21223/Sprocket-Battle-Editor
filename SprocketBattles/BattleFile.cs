@@ -32,6 +32,8 @@ public sealed partial class BattleFile
     /// The weather, by the Custom Battle screen's names (maps whose weather is fixed ignore it).
     public string Clouds { get; set; } = "Clear";
     public string Fog { get; set; } = "None";
+    /// A fixed lighting choice; Map default preserves the map's authored sun and sky, including older files.
+    public string TimeOfDay { get; set; } = BattleTimeOfDay.MapDefault;
     public List<BattleUnit> Units { get; set; } = new();
     public MissionData? Mission { get; set; }
     public CinemaData? Cinema { get; set; }

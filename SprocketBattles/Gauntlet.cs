@@ -141,6 +141,7 @@ internal static class Gauntlet
         var wave = GauntletProgression.Wave(r.Ledger.Round, r.Settings.Rounds, r.Capacity, r.Opponents.Count);
         var enemy = r.Opponents[wave.Tier];
         var file = new BattleFile { Name = $"Gauntlet — round {r.Ledger.Round} of {r.Settings.Rounds}", Map = r.Settings.Map,
+            TimeOfDay = r.Settings.TimeOfDay,
             Description = "Repair and refit within your remaining funds, then defeat the next round.",
             Objective = "Defeat every opponent", Failure = "Lose your tank",
             Gauntlet = new GauntletBattleInfo { RunId = r.Id, Round = r.Ledger.Round },

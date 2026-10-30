@@ -210,6 +210,9 @@ static class RuntimeMapTests
             File.WriteAllText(file, RuntimeMapFiles.Write(manifest));
             Check(RuntimeMapFiles.Ready(file, "f") == null && RuntimeMapFiles.Failed(file, "f") == "no starting areas", "a refused source is remembered, not checked again");
             Check(RuntimeMapFiles.Failed(file, "changed") == null, "a changed source is checked again");
+            manifest.Failure = "No connected, clear tank formation pair exists at 16, 8, 4, 2 or 1 tanks a side: This map needs two connected, clear team spawn formations at least 100 metres apart.";
+            File.WriteAllText(file, RuntimeMapFiles.Write(manifest));
+            Check(RuntimeMapFiles.Failed(file, "f") == null, "a map 1.1.0 refused for lacking starting areas is checked again");
             Check(RuntimeMapFiles.Key("a", "f") == RuntimeMapFiles.Key("a", "f") && RuntimeMapFiles.Key("a", "f") != RuntimeMapFiles.Key("a", "g") && RuntimeMapFiles.Key("a", "f").Length == 32, "cache keys");
         }
         finally { Directory.Delete(root, true); }

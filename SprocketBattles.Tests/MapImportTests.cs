@@ -112,6 +112,9 @@ static class MapImportTests
             File.WriteAllText(report,JsonSerializer.Serialize(new { ready=true,pathComplete=true,originalsPreserved=true,originalImportersRestored=true,spawnCount=2,
                 bundleSha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle))).ToLowerInvariant() }));
             Check(MapImportConversion.Ready(report,bundle,out var capacity)&&capacity==2,"complete cache entries accepted");
+            File.WriteAllText(report,JsonSerializer.Serialize(new { ready=true,pathComplete=false,originalsPreserved=true,originalImportersRestored=true,spawnCount=2,
+                bundleSha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle))).ToLowerInvariant() }));
+            Check(MapImportConversion.Ready(report,bundle,out _),"a map without checked starting areas (no path between them) is accepted");
             File.AppendAllText(bundle,"broken");
             Check(!MapImportConversion.Ready(report,bundle,out _),"tampered/partial cache bundle rejected");
             foreach(var malformed in new[]{"[]","{\"ready\":true}","{\"ready\":true,\"pathComplete\":true,\"originalsPreserved\":true,\"originalImportersRestored\":true,\"spawnCount\":999999999999999999999}","{\"ready\":true,\"pathComplete\":true,\"originalsPreserved\":true,\"originalImportersRestored\":true,\"spawnCount\":\"two\"}"})
