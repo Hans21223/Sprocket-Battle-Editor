@@ -11,7 +11,7 @@ namespace SprocketMaps;
 [BepInPlugin("local.sprocket.maps", "Map Framework", Version)]
 public sealed class Plugin : BasePlugin
 {
-    const string Version = "1.1.0";
+    const string Version = "1.1.1";
 
     internal static ManualLogSource ModLog = null!;
     internal static bool DestructibleTreesOff; // the tree effect guard could not be installed
@@ -21,6 +21,8 @@ public sealed class Plugin : BasePlugin
     public static string? CustomMapLoadName(string? map) => Maps.CustomLoadName(map);
     public static string? TakeLoadFailure() => CustomMapBridge.TakeLoadFailure();
     public static string? MapNotReadyReason(string? map) => CustomMapBridge.NotReadyReason(map);
+    /// For a battle's time of day: the map's lamps and glow as made (NaN), off (-infinity), or at a camera exposure (EV100).
+    public static string? MapLamps(string? map, float exposure) => CustomMapBridge.Lamps(map, exposure);
 
     public override void Load()
     {

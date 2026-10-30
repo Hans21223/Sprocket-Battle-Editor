@@ -12,7 +12,7 @@ namespace SprocketBattles;
 [BepInDependency(ModApi.Guid, BepInDependency.DependencyFlags.SoftDependency)] // Sprocket Mod API, if installed (ModApi.cs)
 public sealed class Plugin : BasePlugin
 {
-    const string Version = "0.18.1";
+    const string Version = "0.18.2";
 
     internal static ManualLogSource ModLog = null!;
 

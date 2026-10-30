@@ -25,6 +25,9 @@ internal static class CustomMapBridge
 {
     internal const string Carrier = "Sandbox (Low performance)";
     internal const float SpawnSpacing = 8;
+    /// Tanks a side on every custom map, the most the game's spawn points hold: room to start isn't a limit, since a map
+    /// without checked starting areas starts on open ground (OpenGround) and the Battle Editor places its own tanks.
+    internal const ushort TanksPerSide = 16;
     /// A map from a scene bundle (`Bundle`, `ScenePath`), or one the game builds itself (`Runtime`: its folder and
     /// map.json). `Source`: a Garry's Mod map's own light and sky, with the folder its files are in.
     internal sealed record Definition(string Identifier, string ScenePath, AssetBundle? Bundle, Maps.Map Map, CustomMapManifest.Lighting? Lighting = null,
@@ -49,6 +52,66 @@ internal static class CustomMapBridge
         return session is { } s && s.Definition.Identifier.Equals(name, StringComparison.OrdinalIgnoreCase)
             && s.Lifetime.CanEnterMap ? null : "The custom map is still loading.";
     }
+    /// A battle's time of day for the map's own lamps and glowing surfaces (lit windows, signs): NaN as the map made them,
+    /// -infinity off, or else on at that camera exposure (EV100).
+    internal static string? Lamps(string? name, float exposure)
+    {
+        if (session is not { Prepared: true } s || name == null || !s.Definition.Identifier.Equals(name, StringComparison.OrdinalIgnoreCase))
+            return "The custom map isn't loaded.";
+        s.LampsAsMade ??= LampList(s);
+        s.GlowAsMade ??= s.Materials.Where(m => m != null && m.HasProperty("_EmissiveColor") && m.GetColor("_EmissiveColor").maxColorComponent > 0)
+            .Select(m => (m, m.GetColor("_EmissiveColor"))).ToList();
+        // Made for the map's own exposure: at a chosen time the lamps become the game's kind (MapLighting.StreetLamp)
+        // and the glow keeps its brightness on screen. Those on the game's scale (Garry's Mod lamps) stay as made.
+        bool on = !float.IsNegativeInfinity(exposure), own = s.LampExposure != null && !float.IsNaN(exposure);
+        float glow = !on ? 0 : own ? Mathf.Pow(2, exposure - s.LampExposure!.Value) : 1;
+        foreach (var (lamp, intensity, range, _, street) in s.LampsAsMade)
+            if (lamp != null)
+            {
+                lamp.intensity = own ? street.Intensity : intensity;
+                lamp.range = own ? street.Range : range;
+                if (!on) lamp.enabled = false;
+            }
+        foreach (var (material, made) in s.GlowAsMade)
+            if (material != null) material.SetColor("_EmissiveColor", made * glow);
+        s.LampsOff = !on;
+        nextLampCheck = 0; // TickLamps lights the nearest at once
+        return null;
+    }
+
+    static List<(Light Item, float Intensity, float Range, bool Enabled, (float Intensity, float Range) Street)> LampList(Session s) =>
+        s.Roots.Append(s.Environment).Where(r => r != null).SelectMany(r => r!.GetComponentsInChildren<Light>(true))
+            .Where(l => l.type is LightType.Point or LightType.Spot).Select(l => (l, l.intensity, l.range, l.enabled, MapLighting.StreetLamp(l))).ToList();
+
+    static float nextLampCheck;
+    static bool lampTicksFailed;
+    const int NearLamps = 32, ShadowLamps = 6;
+
+    /// Four times a second only the map's NearLamps lamps nearest the camera shine, the ShadowLamps nearest with shadows:
+    /// Unity counts every lamp whose light reaches the view, and past the renderer's cap a different set dropped out each
+    /// frame (flicker on Demo City's ~1,500 lamps, 2026-10-30); shadows on them all would cost too much.
+    internal static void TickLamps()
+    {
+        if (lampTicksFailed || session is not { Prepared: true, LampsOff: false } s || Time.unscaledTime < nextLampCheck) return;
+        nextLampCheck = Time.unscaledTime + .25f;
+        try
+        {
+            var camera = Camera.main;
+            if (camera == null) camera = Camera.allCameras.FirstOrDefault(c => c.targetTexture == null); // the Battle Editor's own view
+            if (camera == null) return;
+            var at = camera.transform.position;
+            int rank = 0;
+            foreach (var lamp in (s.LampsAsMade ??= LampList(s)).Where(l => l.Enabled && l.Item != null).Select(l => l.Item)
+                .OrderBy(l => (l.transform.position - at).sqrMagnitude))
+            {
+                bool shine = rank < NearLamps;
+                var shadows = rank++ < ShadowLamps ? LightShadows.Soft : LightShadows.None;
+                if (lamp.enabled != shine) lamp.enabled = shine;
+                if (lamp.shadows != shadows) lamp.shadows = shadows;
+            }
+        }
+        catch (Exception ex) { lampTicksFailed = true; Plugin.ModLog.LogWarning($"Map lamps stay as they are: {ex.Message}"); }
+    }
     internal static string? TakeLoadFailure() { var reason = loadFailure; loadFailure = null; return reason; }
     internal static void Disable(string userReason)
     {
@@ -64,7 +127,7 @@ internal static class CustomMapBridge
         if (File.Exists(manifest) && new FileInfo(manifest).Length > 16384)
             throw new InvalidOperationException("The custom map manifest is too large.");
         var metadata = CustomMapManifest.Read(File.Exists(manifest) ? File.ReadAllText(manifest) : null);
-        ushort capacity = metadata.Capacity;
+        ushort capacity = TanksPerSide;
         string? displayName = metadata.DisplayName;
         var bundle = CustomMapBundle.Open(file);
         var found = new List<(string Name, string Path)>();
@@ -105,7 +168,7 @@ internal static class CustomMapBridge
         if (definitions.ContainsKey(name)) return;
         var input = Path.Combine(folder, "Input");
         var source = manifest.Lighting == null ? null : ReadSourceLighting(Path.Combine(input, manifest.Lighting));
-        var capacity = (ushort)manifest.Capacity;
+        ushort capacity = TanksPerSide;
         var map = new Maps.Map(name, capacity, "custom map built in the game", Carrier,
             Description: $"Custom map: {manifest.DisplayName}. Up to {capacity} tanks per side. Uses the game's normal vehicle designer and battle controls.",
             DisplayName: manifest.DisplayName);
@@ -288,7 +351,7 @@ internal static class CustomMapBridge
         CloneTerrainMaterials(s);
         Optional("the game's water", () => NativeWater.Apply(s.Environment, s.Roots, s.Owned));
         HideCarrierEnvironment(s);
-        Optional("the map's own lighting", () => MapLighting.Apply(s.Definition.Lighting, s.Controller.gameObject.scene, s.Roots, s.Environment, s.Owned, s.Undo));
+        s.LampExposure = Optional("the map's own lighting", () => MapLighting.Apply(s.Definition.Lighting, s.Controller.gameObject.scene, s.Roots, s.Environment, s.Owned, s.Undo));
         if (s.Definition.Source is { } source)
             Optional("the map's own sky and sun", () => MapLighting.ApplySource(source, s.Definition.SourceFolder ?? "", s.Controller.gameObject.scene, s.Roots, s.Environment, s.Bounds, s.Owned, s.Undo));
         Physics.SyncTransforms();
@@ -337,13 +400,44 @@ internal static class CustomMapBridge
         Physics.SyncTransforms();
     }
 
-    static Vector3 CustomGround(Session s, Vector2 at)
+    static Vector3 CustomGround(Session s, Vector2 at) => (s.Environment == null ? null : Flat(s.Environment, s.Bounds, at)) is { } ground
+        ? ground + Vector3.up * 0.5f : throw new InvalidOperationException("The native designer's starting point has no supported custom ground.");
+
+    /// The highest level ground of the map under `at`, or null.
+    static Vector3? Flat(GameObject environment, Bounds bounds, Vector2 at)
     {
-        foreach (var hit in Physics.RaycastAll(new Vector3(at.x, s.Bounds.max.y + 100, at.y), Vector3.down,
-            s.Bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore).OrderBy(h => h.distance))
-            if (hit.collider != null && s.Environment != null && hit.collider.transform.IsChildOf(s.Environment.transform)
-                && hit.normal.y >= 0.95f) return hit.point + Vector3.up * 0.5f;
-        throw new InvalidOperationException("The native designer's starting point has no supported custom ground.");
+        foreach (var hit in Physics.RaycastAll(new Vector3(at.x, bounds.max.y + 100, at.y), Vector3.down,
+            bounds.size.y + 200, ~0, QueryTriggerInteraction.Ignore).OrderBy(h => h.distance))
+            if (hit.collider != null && hit.collider.transform.IsChildOf(environment.transform) && hit.normal.y >= 0.95f) return hit.point;
+        return null;
+    }
+
+    /// A spawn slot's ground: where the formation puts it, or pulled in towards its team's front row when that spot has
+    /// none (a formation bigger than the open ground around an unchecked start).
+    static Vector3 SlotGround(Session s, Vector2 front, Vector2 offset)
+    {
+        for (int k = 4; k > 0; k--)
+            if (Flat(s.Environment!, s.Bounds, front + offset * (k / 4f)) is { } ground) return ground + Vector3.up * 0.5f;
+        return CustomGround(s, front);
+    }
+
+    /// Two starting points when no checked ones exist: the map's own Sprocket Spawn Area markers, or else the two level
+    /// spots farthest apart on a grid over the middle of the map. Nothing checks room or a route between them.
+    internal static (Vector3 A, Vector3 B) OpenGround(GameObject environment, Bounds bounds)
+    {
+        var transforms = environment.GetComponentsInChildren<Transform>(true);
+        var markerA = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area A");
+        var markerB = transforms.FirstOrDefault(t => t.name == "Sprocket Spawn Area B");
+        if (markerA != null && markerB != null) return (markerA.position, markerB.position);
+        var spots = new List<Vector3>();
+        for (int z = 4; z <= 28; z++)
+            for (int x = 4; x <= 28; x++)
+                if (Flat(environment, bounds, new Vector2(Mathf.Lerp(bounds.min.x, bounds.max.x, x / 32f), Mathf.Lerp(bounds.min.z, bounds.max.z, z / 32f))) is { } spot)
+                    spots.Add(spot);
+        if (spots.Count < 2) throw new InvalidDataException("This map has no level ground for tanks to start on."); // the map's own problem: an import keeps it
+        var (a, b) = (spots[0], spots[1]);
+        foreach (var p in spots) foreach (var q in spots) if ((p - q).sqrMagnitude > (a - b).sqrMagnitude) (a, b) = (p, q);
+        return (a, b);
     }
 
     static void AdaptNativeAuthoring(Session s, Vector2 attackers, Vector2 defenders)
@@ -396,7 +490,7 @@ internal static class CustomMapBridge
                 {
                     var offset = SpawnFormation.Offset(s.Definition.Map.Spawns, i, SpawnSpacing);
                     var delta = side * offset.Side + back * offset.Back;
-                    var place = CustomGround(s, at + new Vector2(delta.x, delta.z));
+                    var place = SlotGround(s, at, new Vector2(delta.x, delta.z));
                     points.transform.GetChild(i).SetPositionAndRotation(place + Vector3.up * 2, rotation);
                 }
                 points.random = false; points.randomOnConnectingLines = false;
@@ -469,7 +563,17 @@ internal static class CustomMapBridge
             .ToArray();
         foreach (var collider in shoved) collider.enabled = false;
         Physics.SyncTransforms();
-        try { var (a, d, _, _) = FindStarts(s.Environment!, s.Bounds, s.Definition.Map.Spawns, s.Definition.Identifier); return (a, d); }
+        try
+        {
+            try { var (a, d, _, _) = FindStarts(s.Environment!, s.Bounds, s.Definition.Map.Spawns, s.Definition.Identifier); return (a, d); }
+            catch (InvalidOperationException ex)
+            {
+                // No checked room for every tank: the map still opens (the Battle Editor puts its tanks where the battle says).
+                var (a, d) = OpenGround(s.Environment!, s.Bounds);
+                Plugin.ModLog.LogWarning($"'{s.Definition.Identifier}': {ex.Message} The teams start on open ground {Vector3.Distance(a, d):0} m apart instead.");
+                return (new Vector2(a.x, a.z), new Vector2(d.x, d.z));
+            }
+        }
         finally { foreach (var collider in shoved) if (collider) collider.enabled = true; Physics.SyncTransforms(); }
     }
 
@@ -967,6 +1071,10 @@ internal static class CustomMapBridge
         internal bool Prepared, Merged, Initialized, Recovering;
         internal readonly List<GameObject> Roots = new();
         internal readonly List<Material> Materials = new();
+        internal float? LampExposure; // the map's own lighting's exposure: its lamps' and glow's brightness scale
+        internal List<(Light Item, float Intensity, float Range, bool Enabled, (float Intensity, float Range) Street)>? LampsAsMade; // taken on first use
+        internal bool LampsOff; // a battle's daytime: TickLamps leaves them off
+        internal List<(Material Item, Color Glow)>? GlowAsMade;
         internal readonly List<UnityEngine.Object> Owned = new(); // other runtime assets made for this map
         internal readonly List<Action> Undo = new(); // carrier changes to reverse when the map goes
         internal readonly List<(Renderer Item, bool Enabled)> Renderers = new();
@@ -1090,7 +1198,7 @@ internal static class CustomMapBridge
 public sealed class CustomMapRunner : MonoBehaviour
 {
     public CustomMapRunner(IntPtr pointer) : base(pointer) { }
-    void Update() { AutoMapImport.Step(); CustomMapBridge.Step(); Destructibles.Tick(); }
+    void Update() { AutoMapImport.Step(); CustomMapBridge.Step(); Destructibles.Tick(); CustomMapBridge.TickLamps(); }
     void OnGUI() => AutoMapImport.Draw();
     void OnApplicationQuit() => AutoMapImport.Stop();
 }

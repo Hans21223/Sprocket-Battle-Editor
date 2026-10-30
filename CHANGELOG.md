@@ -1,3 +1,29 @@
+# Battle Editor 0.18.2 + Map Framework 1.1.1 (Beta)
+
+Battle Editor 0.18.2:
+
+- Time of day: Map default, Dawn, Morning, Noon, Afternoon, Sunset and Night. Change it in the editor's
+  Tanks panel, a saved battle's menu, Quick battle or Gauntlet setup. Save keeps it with the battle,
+  including sharing and replays; a Gauntlet run keeps its choice between rounds and on resume.
+- Uses the game's native sun/moon cycle. On a custom map, a chosen time turns the map's own lighting off and
+  brings its own sky, under the game's exposure and fog (the map's lighting left a black sky and white-hot
+  ground at Noon). Map default keeps the map's own lighting.
+- A custom map's lamps and lit windows follow the time: off at Morning, Noon and Afternoon. At Dawn, Sunset and
+  Night its lamps become the game's kind of lamp (about 30 lux on what they light, times Lighting > Real-time lamp
+  brightness) and its windows glow as under the map's own lighting.
+- Fog None is a clear view: the game's own None still left 1 km of haze, which showed as mist on city maps.
+
+Map Framework 1.1.1:
+
+- Every custom map takes 16 tanks a side. A map without checked starting areas still opens: its teams start on
+  open ground far apart, and maps an earlier check refused for that are checked again.
+- Maps that bring their own lighting are 20% dimmer: Unity maps through the exposure (baked light included),
+  Garry's Mod maps through their sun, sky and lamps.
+- A map's own fog is off by default. Lighting > Map fog turns it on.
+- The Battle Editor's time of day switches a map's lamps and lit windows (MapLamps).
+- Only the 32 lamps nearest the camera shine in real time, the 6 nearest with shadows: too many lights flickered,
+  and tanks now get lamp shadows.
+
 # Battle Editor 0.18.1 + Map Framework 1.1.0 (Beta)
 
 Battle Editor 0.18.1:

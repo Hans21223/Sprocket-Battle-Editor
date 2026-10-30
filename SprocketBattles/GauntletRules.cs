@@ -9,6 +9,7 @@ public sealed class GauntletSettings
     public int Budget { get; set; } = 100000;
     public int Rounds { get; set; } = 10;
     public string Map { get; set; } = "";
+    public string TimeOfDay { get; set; } = BattleTimeOfDay.MapDefault;
     public string Pool { get; set; } = "the game's";
     public string? EnemyFaction { get; set; }
     public string? Era { get; set; }
@@ -16,7 +17,7 @@ public sealed class GauntletSettings
     public string? Check() => Budget < 1000 || Budget > 10000000 ? "Starting funds must be from 1,000 to 10,000,000."
         : Rounds < 2 || Rounds > 30 ? "Choose from 2 to 30 Gauntlet rounds."
         : string.IsNullOrWhiteSpace(Map) ? "Choose a map for Gauntlet."
-        : Spawns?.Check();
+        : BattleTimeOfDay.Check(TimeOfDay) ?? Spawns?.Check();
 }
 
 /// The campaign's finances are checked before the native loading bridge and paid once a round actually spawns.

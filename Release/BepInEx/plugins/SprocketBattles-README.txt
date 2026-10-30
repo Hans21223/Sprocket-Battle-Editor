@@ -1,6 +1,13 @@
-Sprocket Battle Editor 0.18.1 + Map Framework 1.1.0 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
+Sprocket Battle Editor 0.18.2 + Map Framework 1.1.1 - for Sprocket 0.2.55.5 and 0.2.56 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
+0.18.2: Time of day in the Tanks panel and saved battle menu: Map default, Dawn, Morning, Noon, Afternoon,
+Sunset, Night. Save keeps it for play, sharing and replays. Map default restores authored lighting.
+Quick battle and Gauntlet setup offer the same choices. Gauntlet keeps its choice between rounds and on resume.
+Other times give a custom map their own sky under the game's exposure and fog; its lamps and lit windows shine
+only at Dawn, Sunset and Night. Fog None is a clear view, no haze.
+Map Framework 1.1.1: every custom map takes 16 tanks a side (open-ground starts when it has no checked areas);
+only the 32 nearest map lamps shine, 6 with shadows (no more lamp flicker); a map's own fog is off by default.
 0.18.1: a shared battle brings in only its pictures (Paint and Decals), nothing else.
 Map Framework 1.1.0: OBJ and Garry's Mod maps import without Unity (the game builds them), and Garry's Mod maps
 bring their own sun, sky, fog and lamps.

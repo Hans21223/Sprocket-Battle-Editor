@@ -231,23 +231,32 @@ public static class SprocketAutoMapExport
                 attempt.candidates = report.searchCandidates; attempt.pathChecks = report.pathTestedPairs; attempt.formationChecks = report.formationTestedPairs;
                 if (pairFound) break;
             }
-            if (!pairFound) throw new InvalidOperationException("No safe connected tank formation pair exists at capacities 16, 8, 4, 2 or 1.");
-            Marker(source, "Sprocket Spawn Area A", report.markerA);
-            Marker(source, "Sprocket Spawn Area B", report.markerB);
+            if (!pairFound)
+            {
+                // No checked starting areas: the map is exported anyway. Map Framework starts its battles on open ground
+                // far apart, and the Battle Editor places its own tanks.
+                report.spawnCount = 16;
+                Debug.Log("SPROCKET_MAP_SPAWN_UNCHECKED: no safe connected tank formation pair at capacities 16, 8, 4, 2 or 1.");
+            }
+            else
+            {
+                Marker(source, "Sprocket Spawn Area A", report.markerA);
+                Marker(source, "Sprocket Spawn Area B", report.markerB);
+                Shoved(true);
+                if (!EditorSceneManager.SaveScene(source, ExportScene)) throw new IOException("Could not save validated spawn markers.");
+                Shoved(false);
+                ValidateTeam(source, bounds, report, "A", report.markerA, report.markerB);
+                ValidateTeam(source, bounds, report, "B", report.markerB, report.markerA);
+                var pathToOtherTeam = new NavMeshPath();
+                report.pathComplete = NavMesh.CalculatePath(report.markerA, report.markerB, NavMesh.AllAreas, pathToOtherTeam)
+                    && pathToOtherTeam.status == NavMeshPathStatus.PathComplete;
+                report.navigationCorners = pathToOtherTeam.corners.Length;
+                if (!report.pathComplete) report.failures.Add("No complete native tank navigation path connects marker A and marker B.");
+                if (report.failures.Count != 0) throw new InvalidOperationException(string.Join("\n", report.failures));
+                Debug.Log("SPROCKET_MAP_VALIDATION_PASS: capacity=" + report.spawnCount + ", positions=" + report.spawnCount * 2
+                    + ", footprint corners=" + report.spawnCount * 8 + ", tank clearance and complete navigation path.");
+            }
             Shoved(true);
-            if (!EditorSceneManager.SaveScene(source, ExportScene)) throw new IOException("Could not save validated spawn markers.");
-            Shoved(false);
-            ValidateTeam(source, bounds, report, "A", report.markerA, report.markerB);
-            ValidateTeam(source, bounds, report, "B", report.markerB, report.markerA);
-            var pathToOtherTeam = new NavMeshPath();
-            report.pathComplete = NavMesh.CalculatePath(report.markerA, report.markerB, NavMesh.AllAreas, pathToOtherTeam)
-                && pathToOtherTeam.status == NavMeshPathStatus.PathComplete;
-            report.navigationCorners = pathToOtherTeam.corners.Length;
-            if (!report.pathComplete) report.failures.Add("No complete native tank navigation path connects marker A and marker B.");
-            if (report.failures.Count != 0) throw new InvalidOperationException(string.Join("\n", report.failures));
-            Shoved(true);
-            Debug.Log("SPROCKET_MAP_VALIDATION_PASS: capacity=" + report.spawnCount + ", positions=" + report.spawnCount * 2
-                + ", footprint corners=" + report.spawnCount * 8 + ", tank clearance and complete navigation path.");
             Status("Saving the imported map");
             var manifest = BuildPipeline.BuildAssetBundles(Output,
                 new[] { new AssetBundleBuild { assetBundleName = BundleName, assetNames = new[] { ExportScene } } },

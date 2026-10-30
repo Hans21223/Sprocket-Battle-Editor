@@ -11,13 +11,20 @@ For **Sprocket 0.2.55.5 and 0.2.56** with the [Sprocket Mod Loader](https://gith
 Both plugins compile against both game versions' interop, so every Harmony patch target and game member they use
 exists in each, and the offline regression suites pass.
 
-**0.18.1 includes Battle Editor 0.18.1 and Map Framework 1.1.0.** Map Framework 1.1 builds OBJ and Garry's Mod maps
+**0.18.2 includes Battle Editor 0.18.2 and Map Framework 1.1.1.** Map Framework 1.1 builds OBJ and Garry's Mod maps
 without Unity, gives Garry's Mod maps (`.gma`, `.bsp`) their own sun, sky, fog and lamps, and keeps a map's own lighting, water and breakable scenery. Map Framework makes Ambush,
 The Crossroad, Silent Border, Sandbox and Sandbox (Low performance) available to Custom Battle and Battle Editor.
 It repairs Ambush's team setup and builds the missing custom-battle setups on the other maps. The Sandbox thumbnails
 are included beside the Map Framework DLL.
 
 Editor Save and Play use the tank positions you place. Random spawn settings belong to the quick-battle and Gauntlet launchers.
+
+0.18.2 adds **Time of day** in the editor's **Tanks** panel and each saved battle's menu:
+**Map default, Dawn, Morning, Noon, Afternoon, Sunset, Night**. Changes preview on the map and Save keeps the
+choice for playing, sharing and replays. Quick battle and Gauntlet setup offer the same choices; a Gauntlet run
+keeps its time between rounds and on resume. Map default keeps a map's own lighting; any other time gives a custom
+map its own sky under the game's exposure and fog, and its lamps and lit windows shine only at Dawn, Sunset and
+Night. Fog **None** is a clear view (the game's own None leaves 1 km of haze).
 
 > **Beta.** Several parts haven't been tried in the game yet; see [Not tried in the game yet](#not-tried-in-the-game-yet).
 > Please report what works and what doesn't in [Issues](../../issues).
@@ -27,8 +34,8 @@ Editor Save and Play use the tank positions you place. Random spawn settings bel
 With **Sprocket Mod Manager**: **Add mod**, choose the ZIP from [Releases](../../releases). By hand: copy the ZIP's
 `BepInEx` folder into the Sprocket folder.
 
-Choose **Sprocket-Battle-Editor-and-Map-Framework-0.18.1.zip** for both plugins. Separate
-**Sprocket-Battle-Editor-0.18.1.zip** and **Sprocket-Map-Framework-1.1.0.zip** downloads are also available; the loader is installed
+Choose **Sprocket-Battle-Editor-and-Map-Framework-0.18.2.zip** for both plugins. Separate
+**Sprocket-Battle-Editor-0.18.2.zip** and **Sprocket-Map-Framework-1.1.1.zip** downloads are also available; the loader is installed
 separately. When updating, replace Battle Editor and remove any older extra copy of `SprocketMaps.dll` before copying
 the included `BepInEx\plugins\SprocketMaps` folder. Keep the two Sandbox PNGs beside that DLL.
 
@@ -58,11 +65,11 @@ Selecting a loose OBJ or FBX imports that model with its texture/material sideca
 included scene, or the largest model/prefab if they contain no scene. Keep all referenced textures with the source.
 Scripts and executable package contents are excluded; custom scripted gameplay and shaders are not imported.
 Static meshes, textures, authored transforms and conventional material colours are preserved, with materials
-adapted to the game's lighting. The importer builds collision/navigation and offers only checked spawn capacity.
-Maps need solid ground at least 100 metres across both axes and two connected tank areas at least 100 metres apart
-(half the map's width on a smaller map).
+adapted to the game's lighting. The importer builds collision/navigation and looks for two connected tank areas at
+least 100 metres apart (half the map's width on a smaller map). Every custom map takes 16 tanks a side; one without
+such areas starts its teams on open ground far apart. Maps need solid ground at least 100 metres across both axes.
 Conversion failures leave built-in maps available and include a diagnostic log path. The source files stay unchanged.
-The standalone **Sprocket-Map-Framework-1.1.0.zip** includes the required `SharpCompress.dll`; keep it beside
+The standalone **Sprocket-Map-Framework-1.1.1.zip** includes the required `SharpCompress.dll`; keep it beside
 `SprocketMaps.dll`. Gameplay validation remains separate from the offline conversion checks.
 An optional JSON file beside a bundle declares its checked tank capacity: for `city.bundle`, use `city.json`
 containing `{"schemaVersion":1,"spawnCount":4,"displayName":"City"}` (1 to 16 tanks per side; displayName is optional). The map picker and spawn formations use

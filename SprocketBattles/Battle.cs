@@ -309,6 +309,7 @@ internal static partial class Battle
 
     internal static void EndScene()
     {
+        BattleLighting.Restore();
         StopOrders();
         Mission.Stop();
         Puppet.ReleaseAll();

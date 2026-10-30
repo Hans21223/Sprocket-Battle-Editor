@@ -328,6 +328,9 @@ internal static class Menu
                 if (clouds[i]?.Name == file.Clouds) config.Environment.CloudChannelMapping = clouds[i].CloudChannelMapping;
         if (map.fogPresets is { } fogs)
             for (int i = 0; i < fogs.Length; i++)
-                if (fogs[i]?.Name == file.Fog) config.Environment.FogDistance = fogs[i].AttenuationDistance;
+                if (fogs[i]?.Name == file.Fog) config.Environment.FogDistance = file.Fog == "None" ? NoFog : fogs[i].AttenuationDistance;
     }
+
+    /// The game's "None" still fogs at 1 km, which shows as mist across a city map; a battle's None is a clear view.
+    const float NoFog = 1e6f;
 }

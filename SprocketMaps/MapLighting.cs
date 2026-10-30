@@ -10,26 +10,45 @@ namespace SprocketMaps;
 
 /// A map built with its own lighting (baked lightmaps or its own sky) keeps it instead of the carrier's daylight:
 /// Unity's built-in brightness scale rather than the game's daylight exposure, the map's real-time sun or moon (none
-/// when the map baked it), a sky from the map's ambient colours or skybox, its fog and its light probes.
+/// when the map baked it), a sky from the map's ambient colours or skybox, its fog (with Map fog on) and its light probes.
 /// A map with an object named "Sprocket Game Lighting" keeps the game's sun and sky.
 internal static class MapLighting
 {
     internal const string OptOut = "Sprocket Game Lighting";
     static ConfigEntry<float>? exposure, lampDistance, lampBrightness;
-    static ConfigEntry<bool>? sourceLighting;
+    static ConfigEntry<bool>? sourceLighting, mapFog;
+
+    // Maps' own light at 80% of what the maths gives: the user found it 20% too bright in game (2026-10-19).
+    const float Light = 0.8f;
 
     internal static void Configure(ConfigFile config)
     {
         exposure = config.Bind("Lighting", "Map lighting exposure", -0.263f,
-            "Exposure (EV100) for maps that bring their own lighting. -0.263 shows them at the brightness Unity's built-in renderer gave them; higher is darker.");
+            "Exposure (EV100) for maps that bring their own lighting. -0.263 shows them 20% dimmer than Unity's built-in renderer gave them; higher is darker.");
         lampDistance = config.Bind("Lighting", "Real-time lamp distance", 150f,
             "Lamps baked into a map also shine in real time within this many metres of the camera, so they light tanks. 0 keeps them baked only; lower it if a lamp-heavy map runs slowly.");
         lampBrightness = config.Bind("Lighting", "Real-time lamp brightness", 1f,
             "Multiplies those real-time lamps' brightness. 1 is as the map's author set them; map lamps are often authored dim " +
             "(Demo City's street lamps: about 6 candela, 16-19 m up), so raise it (4-10) for lamps that visibly light streets and tanks.");
         sourceLighting = config.Bind("Lighting", "GMod map light and sky", true,
-            "Garry's Mod maps use their own sun, sky, fog and lamps. Off: the game's daylight on them, as before 1.1.0.");
+            "Garry's Mod maps use their own sun, sky and lamps. Off: the game's daylight on them, as before 1.1.0.");
+        mapFog = config.Bind("Lighting", "Map fog", false,
+            "Maps that bring their own fog (a Unity map's, a Garry's Mod map's) show it. Off: no fog of the map's own.");
     }
+
+    static bool Fog => mapFog?.Value == true;
+
+    /// A battle's chosen time makes a map's lamp the game's kind of lamp, as its own maps light theirs (Railway's night
+    /// lamps: about 320 cd a few metres up; Demo City's converted ones gave 38 cd 17 m up, 2026-10-30): StreetLux on what
+    /// it points at (along a spot's aim, or down), times Real-time lamp brightness, with the range to get there.
+    internal static (float Intensity, float Range) StreetLamp(Light lamp)
+    {
+        var aim = lamp.type == LightType.Spot ? lamp.transform.forward : Vector3.down;
+        float reach = Mathf.Clamp(Physics.Raycast(lamp.transform.position + aim * .3f, aim, out var hit, 60, ~0, QueryTriggerInteraction.Ignore)
+            ? hit.distance + .3f : lamp.range / 2, 1, 40);
+        return (StreetLux * reach * reach * Mathf.Max(0, lampBrightness?.Value ?? 1), Mathf.Max(lamp.range, 2 * reach));
+    }
+    const float StreetLux = 30; // a lit street
 
     // Baked-only lamps also shine in real time, so they light tanks and draw crisp pools. The bake still holds their light,
     // so lit ground gets it twice: the user chose that over dark tanks (2026-10-11). Spot and point lamps only (real-time
@@ -59,15 +78,16 @@ internal static class MapLighting
         return count;
     }
 
-    internal static void Apply(CustomMapManifest.Lighting? recorded, Scene carrier, IEnumerable<GameObject> roots, GameObject environment, List<UnityEngine.Object> owned, List<Action> undo)
+    /// Returns the exposure (EV100) of the map's own lighting, its lamps' and glow's brightness scale; null: the game's stays.
+    internal static float? Apply(CustomMapManifest.Lighting? recorded, Scene carrier, IEnumerable<GameObject> roots, GameObject environment, List<UnityEngine.Object> owned, List<Action> undo)
     {
         try
         {
             var all = roots.ToList();
-            if (all.SelectMany(r => r.GetComponentsInChildren<Transform>(true)).Any(t => t.name.StartsWith(OptOut, StringComparison.Ordinal))) return;
+            if (all.SelectMany(r => r.GetComponentsInChildren<Transform>(true)).Any(t => t.name.StartsWith(OptOut, StringComparison.Ordinal))) return null;
             var renderers = all.SelectMany(r => r.GetComponentsInChildren<Renderer>(true)).ToList();
             bool lightmapped = renderers.Any(r => r.lightmapIndex is >= 0 and < 65534);
-            if (!lightmapped && recorded?.CustomSky != true) return; // models without scene lighting use the game's
+            if (!lightmapped && recorded?.CustomSky != true) return null; // models without scene lighting use the game's
             // Maps converted before the importer recorded lighting: a dim neutral sky, as a lightmapped map's ambient.
             static Color C(CustomMapManifest.Rgb c) => new(c.R, c.G, c.B);
             var neutral = new CustomMapManifest.Rgb(.18f, .17f, .17f);
@@ -95,7 +115,8 @@ internal static class MapLighting
             T Add<T>() where T : VolumeComponent => profile.Add(Il2CppType.Of<T>(), true).Cast<T>();
             var fixedExposure = Add<Exposure>();
             fixedExposure.mode.Override(ExposureMode.Fixed);
-            fixedExposure.fixedExposure.Override(exposure?.Value ?? -0.263f);
+            float ev = (exposure?.Value ?? -0.263f) - Mathf.Log(Light, 2); // a fixed exposure dims the baked light too
+            fixedExposure.fixedExposure.Override(ev);
             var visual = Add<VisualEnvironment>();
             visual.cloudType.Override(0);
             visual.skyAmbientMode.Override(SkyAmbientMode.Dynamic); // the sky below lights the scene, as the map's ambient did
@@ -122,15 +143,16 @@ internal static class MapLighting
             gradient.top.Override(top); gradient.middle.Override(middle); gradient.bottom.Override(bottom);
             gradient.gradientDiffusion.Override(1);
             var mist = Add<Fog>();
-            mist.enabled.Override(light.Fog);
-            if (light.Fog)
+            bool fog = light.Fog && Fog;
+            mist.enabled.Override(fog);
+            if (fog)
             {
                 mist.colorMode.Override(FogColorMode.ConstantColor);
                 mist.color.Override(C(light.FogColor));
                 mist.albedo.Override(C(light.FogColor));
                 mist.meanFreePath.Override(light.FogMode == "Linear" ? Mathf.Max(1, light.FogEnd / 3) : Mathf.Max(1, 1 / Mathf.Max(1e-4f, light.FogDensity)));
             }
-            var holder = new GameObject("Map lighting");
+            var holder = new GameObject("Map lighting"); // the Battle Editor's time of day turns it off by this name
             holder.transform.SetParent(environment.transform, false);
             var volume = holder.AddComponent<Volume>();
             volume.isGlobal = true; volume.priority = 1000; volume.sharedProfile = profile;
@@ -164,9 +186,11 @@ internal static class MapLighting
             }
             catch (Exception ex) { Plugin.ModLog.LogWarning($"The map's lamps stay baked only: {ex.Message}"); }
             Plugin.ModLog.LogInfo($"Map lighting: the map's own ({(lightmapped ? "lightmaps, " : "")}{(realtimeSun ? "its sun" : "no real-time sun")}, " +
-                $"{(light.Fog ? "fog" : "no fog")}, {(recorded == null ? "a neutral sky: the map file has no recorded lighting" : light.AmbientMode + " ambient")}, exposure {exposure?.Value ?? -0.263f}).");
+                $"{(fog ? "fog" : light.Fog ? "its fog off (Map fog)" : "no fog")}, {(recorded == null ? "a neutral sky: the map file has no recorded lighting" : light.AmbientMode + " ambient")}, exposure {ev:0.###}).");
+            return ev;
         }
         catch (Exception ex) { Plugin.ModLog.LogWarning($"The map's own lighting could not be used; the game's stays: {ex.Message}"); }
+        return null;
     }
 
     /// The carrier's reflection probes hold its own daylight and sky: under a map's own lighting everything inside them
@@ -187,7 +211,7 @@ internal static class MapLighting
 
     /// A Garry's Mod map's own light and sky (SourceLighting), at the game's own exposure: its sun's direction and colour;
     /// its sky (the skybox images as an HDRI cubemap, or GMod's painted sky as a gradient) lighting the scene as the map's
-    /// ambient did; its fog; and its lamps as real-time lights near the camera (as the baked lamps of Unity maps).
+    /// ambient did; its fog (with Map fog on); and its lamps as real-time lights near the camera (as the baked lamps of Unity maps).
     /// Brightness: a daylight sun (Source brightness 250 or more) is the game's sun, as Source's auto-exposure adapted to
     /// it; a dimmer one keeps its share of 250, so night maps stay dark. The ambient and lamps keep their share of the sun.
     /// Anything unavailable keeps the game's.
@@ -203,7 +227,7 @@ internal static class MapLighting
         float sunLux = suns.Count > 0 ? suns.Max(l => l.intensity) : 100000;
         // The game's lux for one unit of Source light.
         float sunSource = source.SunDirection != null ? source.SunBrightness * Luminance(source.SunColor) : 0;
-        float unit = sunLux / Mathf.Max(250, sunSource);
+        float unit = Light * sunLux / Mathf.Max(250, sunSource);
 
         if (source.SunDirection is { Length: 3 } aim)
             foreach (var sun in suns)
@@ -263,7 +287,7 @@ internal static class MapLighting
             gradient.multiplier.Override(skyLux / Mathf.Max(1e-4f, Mathf.PI * (Luminance(top) * 2 + Luminance(horizon)) / 3));
             sky = "its painted sky";
         }
-        if (source.FogColor is { Length: 3 } fogColour)
+        if (Fog && source.FogColor is { Length: 3 } fogColour)
         {
             var mist = Add<Fog>();
             mist.enabled.Override(true);
@@ -280,7 +304,7 @@ internal static class MapLighting
             mist.baseHeight.Override(bounds.max.y);
             mist.maximumHeight.Override(bounds.max.y + 500);
         }
-        var holder = new GameObject("Map sky and sun");
+        var holder = new GameObject("Map sky and sun"); // the Battle Editor's time of day turns it off by this name
         holder.transform.SetParent(environment.transform, false);
         var volume = holder.AddComponent<Volume>();
         volume.isGlobal = true; volume.priority = 1000; volume.sharedProfile = profile;
@@ -319,6 +343,6 @@ internal static class MapLighting
             }
         }
         Plugin.ModLog.LogInfo($"Map lighting: the Garry's Mod map's own ({(source.SunDirection != null ? "its sun" : "the game's sun")}, {sky ?? "the game's sky"}, "
-            + $"{(source.FogColor != null ? "its fog" : "no fog")}, {lamps} lamps within {distance} m).");
+            + $"{(source.FogColor == null ? "no fog" : Fog ? "its fog" : "its fog off (Map fog)")}, {lamps} lamps within {distance} m, at {Light:P0} light).");
     }
 }

@@ -383,7 +383,8 @@ internal static class MapImportConversion
             using var data = JsonDocument.Parse(File.ReadAllText(report));
             var root = data.RootElement;
             bool Flag(string name) => root.TryGetProperty(name,out var value) && value.ValueKind == JsonValueKind.True;
-            if (root.ValueKind != JsonValueKind.Object || !Flag("ready") || !Flag("pathComplete") || !Flag("originalsPreserved") || !Flag("originalImportersRestored")) return false;
+            // No "pathComplete": a map without checked starting areas has no path between them, and is used anyway.
+            if (root.ValueKind != JsonValueKind.Object || !Flag("ready") || !Flag("originalsPreserved") || !Flag("originalImportersRestored")) return false;
             if (!root.TryGetProperty("spawnCount",out var spawnCount) || spawnCount.ValueKind != JsonValueKind.Number || !spawnCount.TryGetInt32(out capacity) || capacity is < 1 or > 16) return false;
             if (!root.TryGetProperty("bundleSha256",out var expectedHash) || expectedHash.ValueKind != JsonValueKind.String) return false;
             var manifest = Path.ChangeExtension(bundle,".json");

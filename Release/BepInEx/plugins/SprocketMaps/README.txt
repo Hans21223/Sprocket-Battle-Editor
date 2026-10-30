@@ -1,10 +1,13 @@
-Map Framework 1.1.0 (Beta)
+Map Framework 1.1.1 (Beta)
 https://github.com/Hans21223/Sprocket-Battle-Editor
 
 For Sprocket 0.2.55.5 and 0.2.56 with the Sprocket Mod Loader (BepInEx 6 IL2CPP). Unity remains 6000.3.21f1.
+New in 1.1.1: every custom map takes 16 tanks a side; one without checked starting areas starts its teams on open
+ground far apart. A map's own fog shows only with Lighting > Map fog on (off by default), and its own lighting is
+20% dimmer. Only the 32 map lamps nearest the camera shine (the 6 nearest with shadows), which stops lamp flicker.
 New in 1.1.0: OBJ and Garry's Mod maps don't need Unity. Without it (or when it fails), the game builds them itself
 and checks them once in the main menu (Import > Build maps in the game: Automatic, Always or Never). Garry's Mod
-maps bring their own sun, skybox or painted sky, fog and lamps (Lighting > GMod map light and sky).
+maps bring their own sun, skybox or painted sky and lamps (Lighting > GMod map light and sky).
 New in 1.0.1: Unity 6000.3.21f1 is found wherever Unity Hub or Unity's installer put it. Before, only Unity Hub's
 default folder and <drive>:\Unity were searched, so an install anywhere else read as "not installed".
 New since 0.4.1 (details in CHANGELOG.md and docs/Making-Custom-Maps.html in the repository):

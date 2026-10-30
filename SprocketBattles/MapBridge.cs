@@ -5,11 +5,11 @@ internal static class MapBridge
 {
     static Type? framework;
 
-    internal static string? Call(string method, string? map = null)
+    internal static string? Call(string method, string? map = null, float value = 0)
     {
         framework ??= AppDomain.CurrentDomain.GetAssemblies()
             .Select(a => a.GetType("SprocketMaps.Plugin", false)).FirstOrDefault(t => t != null);
         var action = framework?.GetMethod(method, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-        return action?.Invoke(null, action.GetParameters().Length == 0 ? null : new object?[] { map }) as string;
+        return action?.Invoke(null, action.GetParameters().Length switch { 0 => null, 1 => new object?[] { map }, _ => new object?[] { map, value } }) as string;
     }
 }
